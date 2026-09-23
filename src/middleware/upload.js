@@ -20,7 +20,16 @@ const FOLDER_BY_FIELD = {
   degreeDoc: 'verification',
   certificateDoc: 'verification',
   resumeDoc: 'verification',
+  identity: 'verification',
+  degree: 'verification',
+  certificate: 'verification',
+  resume: 'verification',
+  documents: 'verification',
   files: 'homework',
+  attachments: 'attachments',
+  resourceFile: 'resources',
+  thumbnail: 'courses',
+  deliverables: 'projects',
   file: 'media',
 };
 

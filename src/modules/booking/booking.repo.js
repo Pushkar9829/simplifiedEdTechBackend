@@ -11,8 +11,8 @@ async function createMany(docs) {
 async function findById(id) {
   return Booking.findById(id)
     .populate('subjectId')
-    .populate('studentUserId', 'name phone')
-    .populate('tutorUserId', 'name phone');
+    .populate('studentUserId', 'name phone role')
+    .populate('tutorUserId', 'name phone role');
 }
 
 async function updateById(id, data) {
@@ -36,8 +36,8 @@ async function list(filter, options = {}) {
   const [items, total] = await Promise.all([
     Booking.find(filter)
       .populate('subjectId')
-      .populate('studentUserId', 'name phone')
-      .populate('tutorUserId', 'name phone')
+      .populate('studentUserId', 'name phone role')
+      .populate('tutorUserId', 'name phone role')
       .sort({ startAt: 1 })
       .skip(skip)
       .limit(limit),

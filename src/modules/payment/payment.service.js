@@ -1,10 +1,19 @@
+const mongoose = require('mongoose');
 const paymentRepo = require('./payment.repo');
 const parentRepo = require('../parent/parent.repo');
 const notificationService = require('../notification/notification.service');
 const { notifyParentsOfStudent } = require('../../utils/parentNotify');
 const walletService = require('../wallet/wallet.service');
 const ApiError = require('../../common/ApiError');
-const { PAYMENT_STATUS, ROLES } = require('../../common/constants');
+const { PAYMENT_STATUS, ROLES, TUTOR_PAYOUT_RATE } = require('../../common/constants');
+
+function money(n) {
+  return Math.round(Number(n || 0) * 100) / 100;
+}
+
+function tutorShare(amount) {
+  return money(amount * TUTOR_PAYOUT_RATE);
+}
 
 async function getPayablePayerIds(user) {
   if (user.role === ROLES.PARENT) {
@@ -48,10 +57,90 @@ async function history(user, query) {
 }
 
 async function tutorEarnings(tutorUserId, query) {
-  return paymentRepo.listPayments(
-    { beneficiaryUserId: tutorUserId, status: PAYMENT_STATUS.PAID },
-    { page: Number(query.page) || 1, limit: Number(query.limit) || 20 }
+  const filter = { beneficiaryUserId: tutorUserId };
+  if (query.status) filter.status = query.status;
+  else filter.status = PAYMENT_STATUS.PAID;
+  if (query.from || query.to) {
+    filter.paidAt = {};
+    if (query.from) filter.paidAt.$gte = new Date(query.from);
+    if (query.to) filter.paidAt.$lte = new Date(query.to);
+  }
+  return paymentRepo.listPayments(filter, {
+    page: Number(query.page) || 1,
+    limit: Number(query.limit) || 20,
+  });
+}
+
+async function earningsSummary(tutorUserId) {
+  const { Payment } = require('./payment.model');
+  const walletService = require('../wallet/wallet.service');
+  const walletPayload = await walletService.getMyWallet(tutorUserId);
+  const paid = await Payment.find({ beneficiaryUserId: tutorUserId, status: PAYMENT_STATUS.PAID })
+    .populate('bookingId', 'subjectId startAt')
+    .populate({ path: 'bookingId', populate: { path: 'subjectId', select: 'name' } });
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lifetimeGross = money(paid.reduce((s, p) => s + p.amount, 0));
+  const thisMonthGross = money(
+    paid.filter((p) => p.paidAt && p.paidAt >= monthStart).reduce((s, p) => s + p.amount, 0)
   );
+  const pending = await Payment.aggregate([
+    {
+      $match: {
+        beneficiaryUserId: new mongoose.Types.ObjectId(String(tutorUserId)),
+        status: { $in: [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.AWAITING_CONFIRMATION] },
+      },
+    },
+    { $group: { _id: null, total: { $sum: '$amount' } } },
+  ]);
+  const pendingGross = money(pending[0]?.total || 0);
+  const monthly = {};
+  const subjects = {};
+  paid.forEach((p) => {
+    const key = (p.paidAt || p.createdAt).toISOString().slice(0, 7);
+    monthly[key] = (monthly[key] || 0) + tutorShare(p.amount);
+    const name = p.bookingId?.subjectId?.name || p.description || 'Other';
+    subjects[name] = (subjects[name] || 0) + tutorShare(p.amount);
+  });
+  return {
+    payoutRate: TUTOR_PAYOUT_RATE,
+    lifetimeGross,
+    lifetime: tutorShare(lifetimeGross),
+    thisMonthGross,
+    thisMonth: tutorShare(thisMonthGross),
+    pendingPayoutGross: pendingGross,
+    pendingPayout: tutorShare(pendingGross),
+    withdrawable: walletPayload.wallet.withdrawableBalance,
+    locked: walletPayload.wallet.lockedBalance,
+    currency: walletPayload.wallet.currency,
+    monthlySeries: Object.entries(monthly)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-8)
+      .map(([month, amount]) => ({ month, amount: money(amount) })),
+    bySubject: Object.entries(subjects)
+      .sort((a, b) => b[1] - a[1])
+      .map(([subject, amount]) => ({ subject, amount: money(amount) })),
+    billing: walletPayload.billing,
+  };
+}
+
+async function fulfillPaidPayment(payment) {
+  if (payment.resourceId) {
+    const resourceService = require('../resource/resource.service');
+    await resourceService.recordPurchase(
+      payment.payerUserId._id || payment.payerUserId,
+      payment.resourceId,
+      payment._id
+    );
+  }
+  if (payment.courseId) {
+    const courseService = require('../course/course.service');
+    await courseService.activateByPayment(payment._id);
+  }
+  if (payment.projectId) {
+    const projectService = require('../project/project.service');
+    await projectService.acceptPaid(payment._id);
+  }
 }
 
 async function pay(user, paymentId, method = 'manual') {
@@ -82,6 +171,7 @@ async function pay(user, paymentId, method = 'manual') {
         tutorUserId: payment.beneficiaryUserId.toString(),
       });
     }
+    await fulfillPaidPayment(updated);
     return updated;
   }
 
@@ -149,6 +239,7 @@ async function adminSetStatus(paymentId, status, adminNote = '') {
         payment: updated,
         tutorUserId: payment.beneficiaryUserId.toString(),
       });
+      await fulfillPaidPayment(updated);
     }
   }
 
@@ -196,6 +287,7 @@ module.exports = {
   listPayable,
   history,
   tutorEarnings,
+  earningsSummary,
   pay,
   adminSetStatus,
   adminList,

@@ -1,4 +1,4 @@
-const { Resource, ResourceBookmark } = require('./resource.model');
+const { Resource, ResourceBookmark, ResourcePurchase } = require('./resource.model');
 
 async function create(data) {
   return Resource.create(data);
@@ -45,7 +45,24 @@ async function listBookmarks(userId) {
 
 async function deleteById(id) {
   await ResourceBookmark.deleteMany({ resourceId: id });
+  await ResourcePurchase.deleteMany({ resourceId: id });
   return Resource.findByIdAndDelete(id);
+}
+
+async function findPurchase(userId, resourceId) {
+  return ResourcePurchase.findOne({ userId, resourceId });
+}
+
+async function upsertPurchase(data) {
+  return ResourcePurchase.findOneAndUpdate(
+    { userId: data.userId, resourceId: data.resourceId },
+    data,
+    { upsert: true, new: true }
+  );
+}
+
+async function listPurchases(userId) {
+  return ResourcePurchase.find({ userId }).select('resourceId');
 }
 
 module.exports = {
@@ -57,4 +74,7 @@ module.exports = {
   unbookmark,
   listBookmarks,
   deleteById,
+  findPurchase,
+  upsertPurchase,
+  listPurchases,
 };

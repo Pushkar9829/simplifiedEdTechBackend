@@ -26,4 +26,10 @@ async function listLinkedStudentIds(parentUserId) {
   return links.map((l) => l.studentUserId);
 }
 
-module.exports = { link, listLinks, findLink, listLinkedStudentIds };
+async function listParentsOfStudents(studentIds) {
+  return ParentStudentLink.find({ studentUserId: { $in: studentIds }, status: 'active' })
+    .populate('parentUserId', 'name phone role')
+    .populate('studentUserId', 'name');
+}
+
+module.exports = { link, listLinks, findLink, listLinkedStudentIds, listParentsOfStudents };

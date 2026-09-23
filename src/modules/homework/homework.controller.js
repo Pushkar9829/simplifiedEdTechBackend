@@ -3,8 +3,13 @@ const { success, created } = require('../../common/response');
 const { asyncHandler } = require('../../utils/asyncHandler');
 
 const create = asyncHandler(async (req, res) => {
-  const data = await homeworkService.create(req.user.id, req.body);
+  const data = await homeworkService.create(req.user.id, req.body, req.files || []);
   return created(res, data, 'Assignment created');
+});
+
+const stats = asyncHandler(async (req, res) => {
+  const data = await homeworkService.tutorStats(req.user.id);
+  return success(res, data);
 });
 
 const list = asyncHandler(async (req, res) => {
@@ -32,4 +37,4 @@ const grade = asyncHandler(async (req, res) => {
   return success(res, data, 'Assignment graded');
 });
 
-module.exports = { create, list, getById, submit, grade };
+module.exports = { create, stats, list, getById, submit, grade };

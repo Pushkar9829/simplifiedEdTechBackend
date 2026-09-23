@@ -18,6 +18,11 @@ const VERIFICATION_STATUS = {
   REJECTED: 'rejected',
 };
 
+const VERIFICATION_DOC_FIELDS = ['identity', 'degree', 'certificate', 'resume'];
+const VERIFICATION_REQUIRED_FIELDS = ['identity', 'degree'];
+const VERIFICATION_MIN_REFERENCES = 2;
+const VERIFICATION_MAX_FILES_PER_FIELD = 5;
+
 const BOOKING_STATUS = {
   PENDING: 'pending',
   CONFIRMED: 'confirmed',
@@ -25,6 +30,16 @@ const BOOKING_STATUS = {
   CANCELLED: 'cancelled',
   RESCHEDULED: 'rescheduled',
 };
+
+const MEETING_STATUS = {
+  SCHEDULED: 'scheduled',
+  LIVE: 'live',
+  ENDED: 'ended',
+  NO_SHOW: 'no_show',
+  CANCELLED: 'cancelled',
+};
+
+const GRADING_SCHEMES = ['ib_1_7', 'percentage', 'marks', 'letter', 'pass_fail'];
 
 const PAYMENT_STATUS = {
   PENDING: 'pending',
@@ -74,6 +89,26 @@ const WITHDRAWAL_STATUS = {
   REJECTED: 'rejected',
 };
 
+const COURSE_STATUS = {
+  DRAFT: 'draft',
+  PUBLISHED: 'published',
+  ARCHIVED: 'archived',
+};
+
+const PROJECT_STATUS = {
+  PROPOSED: 'proposed',
+  ACCEPTED: 'accepted',
+  IN_PROGRESS: 'in_progress',
+  DELIVERED: 'delivered',
+  COMPLETED: 'completed',
+  CANCELLED: 'cancelled',
+};
+
+const RESOURCE_ACCESS = {
+  FREE: 'free',
+  PAID: 'paid',
+};
+
 const RESOURCE_TYPES = [
   'notes',
   'question_bank',
@@ -120,7 +155,13 @@ module.exports = {
   ROLES,
   USER_STATUS,
   VERIFICATION_STATUS,
+  VERIFICATION_DOC_FIELDS,
+  VERIFICATION_REQUIRED_FIELDS,
+  VERIFICATION_MIN_REFERENCES,
+  VERIFICATION_MAX_FILES_PER_FIELD,
   BOOKING_STATUS,
+  MEETING_STATUS,
+  GRADING_SCHEMES,
   PAYMENT_STATUS,
   ASSIGNMENT_STATUS,
   LEVELS,
@@ -132,6 +173,9 @@ module.exports = {
   WALLET_OWNER,
   WALLET_TX_TYPE,
   WITHDRAWAL_STATUS,
+  COURSE_STATUS,
+  PROJECT_STATUS,
+  RESOURCE_ACCESS,
   RESOURCE_TYPES,
   IBDP_SUBJECTS,
 };

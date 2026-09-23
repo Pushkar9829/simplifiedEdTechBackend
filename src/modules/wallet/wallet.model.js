@@ -25,6 +25,30 @@ const walletTransactionSchema = new mongoose.Schema(
     description: { type: String, default: '' },
     refType: { type: String, default: '' },
     refId: { type: String, default: '' },
+    cycle: { type: String, default: '' },
+    availableAt: { type: Date },
+  },
+  { timestamps: true }
+);
+
+const bankAccountSchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+    holderName: { type: String, required: true },
+    accountNumberEnc: { type: String, default: '' },
+    last4: { type: String, default: '' },
+    ifsc: { type: String, default: '' },
+    bankName: { type: String, default: '' },
+    upiId: { type: String, default: '' },
+    status: {
+      type: String,
+      enum: ['unverified', 'pending', 'verified', 'failed'],
+      default: 'unverified',
+    },
+    providerRef: { type: String, default: '' },
+    fundAccountId: { type: String, default: '' },
+    verifiedAt: { type: Date },
+    failReason: { type: String, default: '' },
   },
   { timestamps: true }
 );
@@ -40,6 +64,9 @@ const withdrawalSchema = new mongoose.Schema(
       default: WITHDRAWAL_STATUS.PENDING,
     },
     adminNote: { type: String, default: '' },
+    bankAccountId: { type: mongoose.Schema.Types.ObjectId, ref: 'BankAccount' },
+    cycle: { type: String, default: '' },
+    payoutRef: { type: String, default: '' },
   },
   { timestamps: true }
 );
@@ -47,5 +74,6 @@ const withdrawalSchema = new mongoose.Schema(
 module.exports = {
   Wallet: mongoose.model('Wallet', walletSchema),
   WalletTransaction: mongoose.model('WalletTransaction', walletTransactionSchema),
+  BankAccount: mongoose.model('BankAccount', bankAccountSchema),
   Withdrawal: mongoose.model('Withdrawal', withdrawalSchema),
 };

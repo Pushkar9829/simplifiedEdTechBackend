@@ -22,6 +22,8 @@ async function listAssignments(filter, options = {}) {
   const [items, total] = await Promise.all([
     Assignment.find(filter)
       .populate('subjectId')
+      .populate('studentUserId', 'name')
+      .populate('bookingId', 'startAt timezone status')
       .sort({ deadline: 1 })
       .skip(skip)
       .limit(limit),
@@ -58,7 +60,28 @@ async function gradeSubmission(assignmentId, studentUserId, grade, feedback) {
   );
 }
 
+async function countByStatus(filter) {
+  return Assignment.aggregate([{ $match: filter }, { $group: { _id: '$status', count: { $sum: 1 } } }]);
+}
+
+async function countOverdue(tutorUserId) {
+  return Assignment.countDocuments({
+    tutorUserId,
+    status: 'assigned',
+    deadline: { $lt: new Date() },
+  });
+}
+
+async function listByBookingIds(bookingIds) {
+  return Assignment.find({ bookingId: { $in: bookingIds } })
+    .populate('subjectId', 'name')
+    .sort({ createdAt: -1 });
+}
+
 module.exports = {
+  countByStatus,
+  countOverdue,
+  listByBookingIds,
   createAssignment,
   findAssignmentById,
   updateAssignment,

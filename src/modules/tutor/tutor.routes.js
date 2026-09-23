@@ -1,5 +1,6 @@
 const express = require('express');
 const controller = require('./tutor.controller');
+const bookingController = require('../booking/booking.controller');
 const { authenticate, authorize } = require('../../middleware/auth');
 const { validate } = require('../../middleware/validate');
 const { upload } = require('../../middleware/upload');
@@ -7,98 +8,77 @@ const {
   offeringSchema,
   availabilitySchema,
   reviewVerificationSchema,
+  referencesSchema,
+  referenceOtpSchema,
   studentReviewSchema,
   studentNoteSchema,
   lessonPlanSchema,
   videoSchema,
 } = require('./tutor.validator');
-const { ROLES } = require('../../common/constants');
+const {
+  ROLES,
+  VERIFICATION_DOC_FIELDS,
+  VERIFICATION_MAX_FILES_PER_FIELD,
+} = require('../../common/constants');
 
 const router = express.Router();
+const tutorOnly = [authenticate, authorize(ROLES.TUTOR)];
 
 router.get('/', authenticate, controller.search);
-router.get('/me/offerings', authenticate, authorize(ROLES.TUTOR), controller.myOfferings);
+router.get('/me/offerings', ...tutorOnly, controller.myOfferings);
+router.post('/me/offerings', ...tutorOnly, validate(offeringSchema), controller.addOffering);
+router.delete('/me/offerings/:id', ...tutorOnly, controller.removeOffering);
+router.get('/me/availability', ...tutorOnly, controller.myAvailability);
+router.post('/me/availability', ...tutorOnly, validate(availabilitySchema), controller.addAvailability);
+router.delete('/me/availability/:id', ...tutorOnly, controller.removeAvailability);
+router.patch('/me', ...tutorOnly, controller.updateMe);
+
+router.get('/me/verification', ...tutorOnly, controller.myVerification);
+router.put(
+  '/me/verification/references',
+  ...tutorOnly,
+  validate(referencesSchema),
+  controller.saveReferences
+);
+router.post('/me/verification/references/:idx/send-otp', ...tutorOnly, controller.sendReferenceOtp);
 router.post(
-  '/me/offerings',
-  authenticate,
-  authorize(ROLES.TUTOR),
-  validate(offeringSchema),
-  controller.addOffering
+  '/me/verification/references/:idx/verify-otp',
+  ...tutorOnly,
+  validate(referenceOtpSchema),
+  controller.verifyReferenceOtp
 );
-router.get('/me/availability', authenticate, authorize(ROLES.TUTOR), controller.myAvailability);
-router.post(
-  '/me/availability',
-  authenticate,
-  authorize(ROLES.TUTOR),
-  validate(availabilitySchema),
-  controller.addAvailability
-);
-router.delete(
-  '/me/availability/:id',
-  authenticate,
-  authorize(ROLES.TUTOR),
-  controller.removeAvailability
-);
-router.patch('/me', authenticate, authorize(ROLES.TUTOR), controller.updateMe);
 router.post(
   '/me/verification',
-  authenticate,
-  authorize(ROLES.TUTOR),
-  upload.fields([
-    { name: 'identityDoc', maxCount: 1 },
-    { name: 'degreeDoc', maxCount: 1 },
-    { name: 'certificateDoc', maxCount: 1 },
-    { name: 'resumeDoc', maxCount: 1 },
-  ]),
+  ...tutorOnly,
+  upload.fields(
+    VERIFICATION_DOC_FIELDS.flatMap((name) => [
+      { name, maxCount: VERIFICATION_MAX_FILES_PER_FIELD },
+      { name: `${name}Doc`, maxCount: 1 },
+    ])
+  ),
   controller.submitVerification
 );
-
-router.get('/me/notes', authenticate, authorize(ROLES.TUTOR), controller.listStudentNotes);
-router.post(
-  '/me/notes',
-  authenticate,
-  authorize(ROLES.TUTOR),
-  validate(studentNoteSchema),
-  controller.addStudentNote
-);
 router.delete(
-  '/me/notes/:noteId',
-  authenticate,
-  authorize(ROLES.TUTOR),
-  controller.removeStudentNote
+  '/me/verification/documents/:field/:docId',
+  ...tutorOnly,
+  controller.removeVerificationDocument
 );
 
-router.get('/me/lesson-plans', authenticate, authorize(ROLES.TUTOR), controller.listLessonPlans);
-router.post(
-  '/me/lesson-plans',
-  authenticate,
-  authorize(ROLES.TUTOR),
-  validate(lessonPlanSchema),
-  controller.addLessonPlan
-);
-router.patch(
-  '/me/lesson-plans/:planId',
-  authenticate,
-  authorize(ROLES.TUTOR),
-  controller.updateLessonPlan
-);
-router.delete(
-  '/me/lesson-plans/:planId',
-  authenticate,
-  authorize(ROLES.TUTOR),
-  controller.removeLessonPlan
-);
+router.get('/me/students/:id/last-report', ...tutorOnly, bookingController.studentInsights);
 
-router.get('/me/videos', authenticate, authorize(ROLES.TUTOR), controller.listVideos);
-router.post(
-  '/me/videos',
-  authenticate,
-  authorize(ROLES.TUTOR),
-  upload.single('file'),
-  validate(videoSchema),
-  controller.addVideo
-);
-router.delete('/me/videos/:videoId', authenticate, authorize(ROLES.TUTOR), controller.removeVideo);
+router.get('/me/notes', ...tutorOnly, controller.listStudentNotes);
+router.post('/me/notes', ...tutorOnly, validate(studentNoteSchema), controller.addStudentNote);
+router.delete('/me/notes/:noteId', ...tutorOnly, controller.removeStudentNote);
+
+router.get('/me/lesson-plans', ...tutorOnly, controller.listLessonPlans);
+router.get('/me/lesson-plans/:planId', ...tutorOnly, controller.getLessonPlan);
+router.post('/me/lesson-plans', ...tutorOnly, validate(lessonPlanSchema), controller.addLessonPlan);
+router.patch('/me/lesson-plans/:planId', ...tutorOnly, controller.updateLessonPlan);
+router.delete('/me/lesson-plans/:planId', ...tutorOnly, controller.removeLessonPlan);
+
+router.get('/me/videos', ...tutorOnly, controller.listVideos);
+router.post('/me/videos', ...tutorOnly, upload.single('file'), validate(videoSchema), controller.addVideo);
+router.delete('/me/videos/:videoId', ...tutorOnly, controller.removeVideo);
 
 router.get(
   '/verifications/pending',

@@ -1,4 +1,4 @@
-const { Wallet, WalletTransaction, Withdrawal } = require('./wallet.model');
+const { Wallet, WalletTransaction, Withdrawal, BankAccount } = require('./wallet.model');
 const { WALLET_OWNER } = require('../../common/constants');
 
 async function findUserWallet(userId) {
@@ -43,16 +43,37 @@ async function listTx(walletId, options = {}) {
   return { items, total, page, limit };
 }
 
+async function listAllCredits(walletId) {
+  return WalletTransaction.find({ walletId, type: 'credit' });
+}
+
+async function upsertBankAccount(userId, data) {
+  return BankAccount.findOneAndUpdate({ userId }, { ...data, userId }, { upsert: true, new: true });
+}
+
+async function findBankAccount(userId) {
+  return BankAccount.findOne({ userId });
+}
+
+async function findBankAccountById(id) {
+  return BankAccount.findById(id);
+}
+
 async function createWithdrawal(data) {
   return Withdrawal.create(data);
 }
 
 async function listWithdrawals(filter = {}) {
-  return Withdrawal.find(filter).sort({ createdAt: -1 }).populate('tutorUserId', 'name phone');
+  return Withdrawal.find(filter)
+    .sort({ createdAt: -1 })
+    .populate('tutorUserId', 'name phone')
+    .populate('bankAccountId', 'holderName last4 ifsc bankName status');
 }
 
 async function findWithdrawalById(id) {
-  return Withdrawal.findById(id).populate('tutorUserId', 'name phone');
+  return Withdrawal.findById(id)
+    .populate('tutorUserId', 'name phone')
+    .populate('bankAccountId');
 }
 
 async function updateWithdrawal(id, data) {
@@ -67,6 +88,10 @@ module.exports = {
   adjustBalance,
   addTx,
   listTx,
+  listAllCredits,
+  upsertBankAccount,
+  findBankAccount,
+  findBankAccountById,
   createWithdrawal,
   listWithdrawals,
   findWithdrawalById,

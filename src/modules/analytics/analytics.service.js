@@ -24,6 +24,21 @@ const paymentRepo = require('../payment/payment.repo');
 const cmsRepo = require('../cms/cms.repo');
 const bookingRepo = require('../booking/booking.repo');
 
+function hasVerificationDoc(field) {
+  return {
+    $cond: [
+      {
+        $or: [
+          { $gt: [{ $size: { $ifNull: [`$documents.${field}`, []] } }, 0] },
+          { $gt: [{ $strLenCP: { $ifNull: [`$${field}Doc`, ''] } }, 0] },
+        ],
+      },
+      1,
+      0,
+    ],
+  };
+}
+
 function groupCount(Model, field, match = {}) {
   return Model.aggregate([
     ...(Object.keys(match).length ? [{ $match: match }] : []),
@@ -147,20 +162,10 @@ async function overview() {
       {
         $group: {
           _id: null,
-          withIdentity: {
-            $sum: { $cond: [{ $gt: [{ $strLenCP: { $ifNull: ['$identityDoc', ''] } }, 0] }, 1, 0] },
-          },
-          withDegree: {
-            $sum: { $cond: [{ $gt: [{ $strLenCP: { $ifNull: ['$degreeDoc', ''] } }, 0] }, 1, 0] },
-          },
-          withCertificate: {
-            $sum: {
-              $cond: [{ $gt: [{ $strLenCP: { $ifNull: ['$certificateDoc', ''] } }, 0] }, 1, 0],
-            },
-          },
-          withResume: {
-            $sum: { $cond: [{ $gt: [{ $strLenCP: { $ifNull: ['$resumeDoc', ''] } }, 0] }, 1, 0] },
-          },
+          withIdentity: { $sum: hasVerificationDoc('identity') },
+          withDegree: { $sum: hasVerificationDoc('degree') },
+          withCertificate: { $sum: hasVerificationDoc('certificate') },
+          withResume: { $sum: hasVerificationDoc('resume') },
           total: { $sum: 1 },
         },
       },

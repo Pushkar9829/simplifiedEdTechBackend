@@ -41,6 +41,16 @@ const topUp = asyncHandler(async (req, res) => {
   return success(res, data, 'Wallet topped up');
 });
 
+const saveBank = asyncHandler(async (req, res) => {
+  const data = await walletService.saveBankAccount(req.user.id, req.body);
+  return success(res, data, 'Bank account saved');
+});
+
+const verifyBank = asyncHandler(async (req, res) => {
+  const data = await walletService.verifyBankAccount(req.user.id);
+  return success(res, data, data.bankAccount?.status === 'verified' ? 'Bank verified' : 'Verification failed');
+});
+
 module.exports = {
   me,
   withdraw,
@@ -49,4 +59,6 @@ module.exports = {
   adminWithdrawals,
   reviewWithdrawal,
   topUp,
+  saveBank,
+  verifyBank,
 };

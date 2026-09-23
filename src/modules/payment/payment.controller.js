@@ -17,6 +17,11 @@ const earnings = asyncHandler(async (req, res) => {
   return success(res, data);
 });
 
+const earningsSummary = asyncHandler(async (req, res) => {
+  const data = await paymentService.earningsSummary(req.user.id);
+  return success(res, data);
+});
+
 const pay = asyncHandler(async (req, res) => {
   const method = req.body?.method || 'manual';
   const data = await paymentService.pay(req.user, req.params.id, method);
@@ -65,6 +70,7 @@ module.exports = {
   payable,
   history,
   earnings,
+  earningsSummary,
   pay,
   subscribe,
   listPlans,

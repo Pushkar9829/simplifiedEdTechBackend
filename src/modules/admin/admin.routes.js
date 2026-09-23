@@ -17,6 +17,7 @@ router.get('/users', validate(adminListQuerySchema, 'query'), userController.adm
 router.patch('/users/:id/status', validate(adminStatusSchema), userController.adminSetStatus);
 
 router.get('/tutors/verifications/pending', tutorController.pendingVerifications);
+router.get('/tutors/verifications', tutorController.pendingVerifications);
 router.patch(
   '/tutors/:id/verification',
   validate(reviewVerificationSchema),

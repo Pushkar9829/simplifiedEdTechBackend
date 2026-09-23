@@ -27,9 +27,24 @@ const attendance = asyncHandler(async (req, res) => {
   return success(res, data, 'Attendance updated');
 });
 
+const meetingStatus = asyncHandler(async (req, res) => {
+  const data = await bookingService.setMeetingStatus(req.user.id, req.params.id, req.body.meetingStatus);
+  return success(res, data, 'Meeting status updated');
+});
+
 const complete = asyncHandler(async (req, res) => {
-  const data = await bookingService.completeBooking(req.user.id, req.params.id);
+  const data = await bookingService.completeBooking(
+    req.user.id,
+    req.params.id,
+    req.body,
+    req.files || []
+  );
   return success(res, data, 'Booking completed');
+});
+
+const saveReport = asyncHandler(async (req, res) => {
+  const data = await bookingService.saveReport(req.user.id, req.params.id, req.body);
+  return success(res, data, 'Session report saved');
 });
 
 const join = asyncHandler(async (req, res) => {
@@ -37,4 +52,32 @@ const join = asyncHandler(async (req, res) => {
   return success(res, data);
 });
 
-module.exports = { create, list, cancel, reschedule, attendance, complete, join };
+const summary = asyncHandler(async (req, res) => {
+  const data = await bookingService.bookingSummary(req.user, req.params.id);
+  return success(res, data);
+});
+
+const chain = asyncHandler(async (req, res) => {
+  const data = await bookingService.bookingChain(req.user, req.params.id);
+  return success(res, data);
+});
+
+const studentInsights = asyncHandler(async (req, res) => {
+  const data = await bookingService.studentInsights(req.user.id, req.params.studentId || req.params.id);
+  return success(res, data);
+});
+
+module.exports = {
+  create,
+  list,
+  cancel,
+  reschedule,
+  attendance,
+  meetingStatus,
+  complete,
+  saveReport,
+  join,
+  summary,
+  chain,
+  studentInsights,
+};

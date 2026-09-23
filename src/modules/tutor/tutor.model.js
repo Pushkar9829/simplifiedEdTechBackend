@@ -9,10 +9,24 @@ const tutorSubjectSchema = new mongoose.Schema(
     hourlyRate: { type: Number, default: 0 },
     onlineRate: { type: Number, default: 0 },
     offlineRate: { type: Number, default: 0 },
+    currency: { type: String, default: 'USD' },
+    countryId: { type: mongoose.Schema.Types.ObjectId, ref: 'Country' },
     boardId: { type: mongoose.Schema.Types.ObjectId, ref: 'Board' },
     classLevelId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClassLevel' },
   },
   { timestamps: true }
+);
+
+const slotLocationSchema = new mongoose.Schema(
+  {
+    label: { type: String, default: '' },
+    city: { type: String, default: '' },
+    area: { type: String, default: '' },
+    address: { type: String, default: '' },
+    lat: { type: Number },
+    lng: { type: Number },
+  },
+  { _id: false }
 );
 
 tutorSubjectSchema.index({ tutorUserId: 1, subjectId: 1, level: 1 }, { unique: true });
@@ -24,14 +38,42 @@ const availabilitySlotSchema = new mongoose.Schema(
     endAt: { type: Date, required: true },
     timezone: { type: String, default: 'UTC' },
     deliveryMode: { type: String, enum: ['online', 'offline'], default: 'online' },
+    countryId: { type: mongoose.Schema.Types.ObjectId, ref: 'Country' },
+    location: { type: slotLocationSchema, default: undefined },
     isBooked: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
+const verificationDocSchema = new mongoose.Schema({
+  url: { type: String, required: true },
+  name: { type: String, default: '' },
+  mimeType: { type: String, default: '' },
+  uploadedAt: { type: Date, default: Date.now },
+  status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+  rejectReason: { type: String, default: '' },
+});
+
+const verificationReferenceSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  relation: { type: String, default: '' },
+  phone: { type: String, required: true },
+  email: { type: String, default: '' },
+  otpVerified: { type: Boolean, default: false },
+  verifiedAt: { type: Date },
+});
+
 const tutorVerificationSchema = new mongoose.Schema(
   {
     tutorUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+    documents: {
+      identity: [verificationDocSchema],
+      degree: [verificationDocSchema],
+      certificate: [verificationDocSchema],
+      resume: [verificationDocSchema],
+    },
+    references: [verificationReferenceSchema],
+    // Legacy single-file fields, read and folded into `documents`.
     identityDoc: { type: String, default: '' },
     degreeDoc: { type: String, default: '' },
     certificateDoc: { type: String, default: '' },
@@ -40,9 +82,11 @@ const tutorVerificationSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: Object.values(VERIFICATION_STATUS),
-      default: VERIFICATION_STATUS.PENDING,
+      default: VERIFICATION_STATUS.NOT_SUBMITTED,
     },
+    rejectReason: { type: String, default: '' },
     adminNote: { type: String, default: '' },
+    submittedAt: { type: Date },
     reviewedAt: { type: Date },
   },
   { timestamps: true }

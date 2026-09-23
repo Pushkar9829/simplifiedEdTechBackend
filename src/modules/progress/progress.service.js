@@ -48,8 +48,8 @@ async function refreshPredictedGrades(studentUserId) {
   return userRepo.updateStudentProfile(studentUserId, { predictedGrades: predicted });
 }
 
-async function recordGrade({ studentUserId, subjectId, topic, scoreLabel, source }) {
-  const numeric = Number.parseFloat(scoreLabel);
+async function recordGrade({ studentUserId, subjectId, topic, scoreLabel, scoreValue, source }) {
+  const numeric = Number.isFinite(scoreValue) ? scoreValue : Number.parseFloat(scoreLabel);
   const record = await progressRepo.createRecord({
     studentUserId,
     subjectId,

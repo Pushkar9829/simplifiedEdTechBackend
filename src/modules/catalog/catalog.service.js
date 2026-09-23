@@ -1,12 +1,45 @@
 const catalogRepo = require('./catalog.repo');
 const ApiError = require('../../common/ApiError');
 
-async function listBoards(includeInactive) {
-  return catalogRepo.listBoards(includeInactive ? {} : { isActive: true });
+function scopedFilter(includeInactive, countryId) {
+  const filter = includeInactive ? {} : { isActive: true };
+  // Items without a country apply everywhere.
+  if (countryId) filter.$or = [{ countryId }, { countryId: null }, { countryId: { $exists: false } }];
+  return filter;
 }
 
-async function listClassLevels(includeInactive) {
-  return catalogRepo.listClassLevels(includeInactive ? {} : { isActive: true });
+async function listCountries(includeInactive) {
+  return catalogRepo.listCountries(includeInactive ? {} : { isActive: true });
+}
+
+async function createCountry(data) {
+  return catalogRepo.createCountry(data);
+}
+
+async function updateCountry(id, data) {
+  const item = await catalogRepo.updateCountry(id, data);
+  if (!item) throw new ApiError(404, 'Country not found');
+  return item;
+}
+
+async function listCurrencies() {
+  const countries = await catalogRepo.listCountries({ isActive: true });
+  const seen = new Map();
+  for (const c of countries) {
+    if (!seen.has(c.currency)) {
+      seen.set(c.currency, { code: c.currency, symbol: c.currencySymbol, countries: [] });
+    }
+    seen.get(c.currency).countries.push(c.code);
+  }
+  return [...seen.values()];
+}
+
+async function listBoards(includeInactive, countryId) {
+  return catalogRepo.listBoards(scopedFilter(includeInactive, countryId));
+}
+
+async function listClassLevels(includeInactive, countryId) {
+  return catalogRepo.listClassLevels(scopedFilter(includeInactive, countryId));
 }
 
 async function createBoard(data) {
@@ -30,6 +63,10 @@ async function updateClassLevel(id, data) {
 }
 
 module.exports = {
+  listCountries,
+  createCountry,
+  updateCountry,
+  listCurrencies,
   listBoards,
   listClassLevels,
   createBoard,

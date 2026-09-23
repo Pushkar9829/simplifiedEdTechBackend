@@ -13,8 +13,13 @@ const open = asyncHandler(async (req, res) => {
 });
 
 const send = asyncHandler(async (req, res) => {
-  const data = await messageService.send(req.user.id, req.body);
-  return created(res, data, 'Message sent');
+  const data = await messageService.send(req.user.id, req.body, req.files || []);
+  return created(res, data, data.warning || 'Message sent');
+});
+
+const contacts = asyncHandler(async (req, res) => {
+  const data = await messageService.contacts(req.user);
+  return success(res, data);
 });
 
 const listMessages = asyncHandler(async (req, res) => {
@@ -27,4 +32,4 @@ const markRead = asyncHandler(async (req, res) => {
   return success(res, data, 'Marked read');
 });
 
-module.exports = { listConversations, open, send, listMessages, markRead };
+module.exports = { listConversations, open, send, listMessages, markRead, contacts };

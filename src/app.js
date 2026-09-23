@@ -24,6 +24,8 @@ const adminRoutes = require('./modules/admin/admin.routes');
 const studentRoutes = require('./modules/student/student.routes');
 const catalogRoutes = require('./modules/catalog/catalog.routes');
 const walletRoutes = require('./modules/wallet/wallet.routes');
+const courseRoutes = require('./modules/course/course.routes');
+const projectRoutes = require('./modules/project/project.routes');
 
 const app = express();
 
@@ -56,6 +58,8 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/catalog', catalogRoutes);
 app.use('/api/wallets', walletRoutes);
+app.use('/api/courses', courseRoutes);
+app.use('/api/projects', projectRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -52,6 +52,18 @@ async function searchTutors(filters, options = {}) {
     profileQuery.userId = { $in: tutorUserIds };
   }
 
+  const nameQuery = String(filters.search || filters.q || '').trim();
+  if (nameQuery) {
+    const named = await User.find({
+      role: 'tutor',
+      status: 'active',
+      name: new RegExp(nameQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
+      ...(profileQuery.userId ? { _id: profileQuery.userId } : {}),
+    }).select('_id');
+    if (!named.length) return { items: [], total: 0, page, limit };
+    profileQuery.userId = { $in: named.map((u) => u._id) };
+  }
+
   if (filters.country) {
     const users = await User.find({
       role: 'tutor',
@@ -113,7 +125,11 @@ async function getTutorDetail(tutorUserId) {
   );
   if (!profile) return null;
   const [subjects, slots, reviews, verification, videos] = await Promise.all([
-    TutorSubject.find({ tutorUserId }).populate('subjectId'),
+    TutorSubject.find({ tutorUserId })
+      .populate('subjectId')
+      .populate('boardId', 'name')
+      .populate('classLevelId', 'name')
+      .populate('countryId', 'name code currency'),
     AvailabilitySlot.find({ tutorUserId, isBooked: false, startAt: { $gte: new Date() } }).sort({
       startAt: 1,
     }),
@@ -133,7 +149,19 @@ async function upsertOffering(tutorUserId, data) {
 }
 
 async function listOfferings(tutorUserId) {
-  return TutorSubject.find({ tutorUserId }).populate('subjectId');
+  return TutorSubject.find({ tutorUserId })
+    .populate('subjectId')
+    .populate('boardId', 'name code')
+    .populate('classLevelId', 'name')
+    .populate('countryId', 'name code currency currencySymbol');
+}
+
+async function deleteOffering(id, tutorUserId) {
+  return TutorSubject.findOneAndDelete({ _id: id, tutorUserId });
+}
+
+async function findOffering(tutorUserId, subjectId, level) {
+  return TutorSubject.findOne({ tutorUserId, subjectId, ...(level ? { level } : {}) });
 }
 
 async function addAvailability(data) {
@@ -141,7 +169,17 @@ async function addAvailability(data) {
 }
 
 async function listAvailability(tutorUserId) {
-  return AvailabilitySlot.find({ tutorUserId }).sort({ startAt: 1 });
+  return AvailabilitySlot.find({ tutorUserId })
+    .populate('countryId', 'name code')
+    .sort({ startAt: 1 });
+}
+
+async function findSlotOverlap(tutorUserId, startAt, endAt) {
+  return AvailabilitySlot.findOne({
+    tutorUserId,
+    startAt: { $lt: endAt },
+    endAt: { $gt: startAt },
+  });
 }
 
 async function deleteAvailability(id, tutorUserId) {
@@ -156,23 +194,15 @@ async function findSlotById(id) {
   return AvailabilitySlot.findById(id);
 }
 
-async function submitVerification(tutorUserId, data) {
-  return TutorVerification.findOneAndUpdate(
-    { tutorUserId },
-    { ...data, tutorUserId, status: 'pending' },
-    { upsert: true, new: true }
-  );
-}
-
 async function findVerificationByTutor(tutorUserId) {
   return TutorVerification.findOne({ tutorUserId });
 }
 
-async function reviewVerification(tutorUserId, status, adminNote = '') {
+async function getOrCreateVerification(tutorUserId) {
   return TutorVerification.findOneAndUpdate(
     { tutorUserId },
-    { status, adminNote, reviewedAt: new Date() },
-    { new: true }
+    { $setOnInsert: { tutorUserId } },
+    { upsert: true, new: true }
   );
 }
 
@@ -180,8 +210,10 @@ async function setProfileVerification(tutorUserId, verificationStatus) {
   return TutorProfile.findOneAndUpdate({ userId: tutorUserId }, { verificationStatus }, { new: true });
 }
 
-async function listPendingVerifications() {
-  return TutorVerification.find({ status: 'pending' }).populate('tutorUserId', 'name phone');
+async function listVerifications(filter = { status: 'pending' }) {
+  return TutorVerification.find(filter)
+    .populate('tutorUserId', 'name phone email country')
+    .sort({ submittedAt: -1, updatedAt: -1 });
 }
 
 async function upsertReview(tutorUserId, studentUserId, rating, comment = '') {
@@ -229,6 +261,12 @@ async function updateLessonPlan(id, tutorUserId, data) {
   return LessonPlan.findOneAndUpdate({ _id: id, tutorUserId }, data, { new: true });
 }
 
+async function findLessonPlan(id, tutorUserId) {
+  return LessonPlan.findOne({ _id: id, tutorUserId })
+    .populate('subjectId')
+    .populate('studentUserId', 'name phone');
+}
+
 async function listLessonPlans(tutorUserId, filter = {}) {
   return LessonPlan.find({ tutorUserId, ...filter })
     .populate('subjectId')
@@ -257,16 +295,18 @@ module.exports = {
   getTutorDetail,
   upsertOffering,
   listOfferings,
+  deleteOffering,
+  findOffering,
   addAvailability,
   listAvailability,
+  findSlotOverlap,
   deleteAvailability,
   markSlotBooked,
   findSlotById,
-  submitVerification,
   findVerificationByTutor,
-  reviewVerification,
+  getOrCreateVerification,
   setProfileVerification,
-  listPendingVerifications,
+  listVerifications,
   upsertReview,
   recalculateRating,
   createStudentNote,
@@ -274,6 +314,7 @@ module.exports = {
   deleteStudentNote,
   createLessonPlan,
   updateLessonPlan,
+  findLessonPlan,
   listLessonPlans,
   deleteLessonPlan,
   createVideo,

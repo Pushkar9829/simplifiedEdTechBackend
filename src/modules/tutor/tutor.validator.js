@@ -1,5 +1,5 @@
 const Joi = require('joi');
-const { LEVELS } = require('../../common/constants');
+const { LEVELS, VERIFICATION_DOC_FIELDS } = require('../../common/constants');
 
 const offeringSchema = Joi.object({
   subjectId: Joi.string().hex().length(24).required(),
@@ -7,15 +7,26 @@ const offeringSchema = Joi.object({
   hourlyRate: Joi.number().min(0),
   onlineRate: Joi.number().min(0),
   offlineRate: Joi.number().min(0),
-  boardId: Joi.string().hex().length(24),
-  classLevelId: Joi.string().hex().length(24),
+  currency: Joi.string().length(3).uppercase(),
+  countryId: Joi.string().hex().length(24).allow(''),
+  boardId: Joi.string().hex().length(24).allow(''),
+  classLevelId: Joi.string().hex().length(24).allow(''),
 });
 
 const availabilitySchema = Joi.object({
   startAt: Joi.string().required(),
   endAt: Joi.string().required(),
-  timezone: Joi.string().default('UTC'),
+  timezone: Joi.string().allow(''),
   deliveryMode: Joi.string().valid('online', 'offline'),
+  countryId: Joi.string().hex().length(24).allow(''),
+  location: Joi.object({
+    label: Joi.string().allow(''),
+    city: Joi.string().allow(''),
+    area: Joi.string().allow(''),
+    address: Joi.string().allow(''),
+    lat: Joi.number(),
+    lng: Joi.number(),
+  }),
 });
 
 const videoSchema = Joi.object({
@@ -26,7 +37,38 @@ const videoSchema = Joi.object({
 
 const reviewVerificationSchema = Joi.object({
   status: Joi.string().valid('approved', 'rejected').required(),
+  rejectReason: Joi.string().allow('').max(1000),
   adminNote: Joi.string().allow(''),
+  documents: Joi.array().items(
+    Joi.object({
+      field: Joi.string().valid(...VERIFICATION_DOC_FIELDS).required(),
+      docId: Joi.string().hex().length(24).required(),
+      status: Joi.string().valid('approved', 'rejected', 'pending').required(),
+      rejectReason: Joi.string().allow('').max(500),
+    })
+  ),
+});
+
+const referencesSchema = Joi.object({
+  references: Joi.array()
+    .items(
+      Joi.object({
+        name: Joi.string().trim().min(2).required(),
+        relation: Joi.string().allow('').max(100),
+        phone: Joi.string()
+          .trim()
+          .pattern(/^\+?[0-9]{8,15}$/)
+          .required()
+          .messages({ 'string.pattern.base': 'Reference phone must be 8-15 digits' }),
+        email: Joi.string().email().allow(''),
+      })
+    )
+    .max(5)
+    .required(),
+});
+
+const referenceOtpSchema = Joi.object({
+  otp: Joi.string().trim().min(4).max(8).required(),
 });
 
 const studentReviewSchema = Joi.object({
@@ -56,6 +98,8 @@ module.exports = {
   offeringSchema,
   availabilitySchema,
   reviewVerificationSchema,
+  referencesSchema,
+  referenceOtpSchema,
   studentReviewSchema,
   studentNoteSchema,
   lessonPlanSchema,

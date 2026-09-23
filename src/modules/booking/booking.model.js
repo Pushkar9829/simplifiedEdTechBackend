@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { BOOKING_STATUS, LEVELS } = require('../../common/constants');
+const { BOOKING_STATUS, MEETING_STATUS, LEVELS } = require('../../common/constants');
 
 const bookingSchema = new mongoose.Schema(
   {
@@ -22,9 +22,25 @@ const bookingSchema = new mongoose.Schema(
       count: { type: Number, default: 1 },
     },
     parentBookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Booking' },
+    seriesId: { type: mongoose.Schema.Types.ObjectId, index: true },
     bookedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     deliveryMode: { type: String, enum: ['online', 'offline'], default: 'online' },
     meetingUrl: { type: String, default: '' },
+    zoom: {
+      meetingId: { type: String, default: '' },
+      joinUrl: { type: String, default: '' },
+      startUrl: { type: String, default: '' },
+      password: { type: String, default: '' },
+      provider: { type: String, default: '' },
+    },
+    meetingStatus: {
+      type: String,
+      enum: Object.values(MEETING_STATUS),
+      default: MEETING_STATUS.SCHEDULED,
+    },
+    startedAt: { type: Date },
+    completedAt: { type: Date },
+    sessionReportId: { type: mongoose.Schema.Types.ObjectId, ref: 'SessionReport' },
     notes: { type: String, default: '' },
     attendance: {
       type: String,
@@ -38,5 +54,6 @@ const bookingSchema = new mongoose.Schema(
 );
 
 bookingSchema.index({ tutorUserId: 1, startAt: 1, endAt: 1 });
+bookingSchema.index({ tutorUserId: 1, studentUserId: 1, subjectId: 1, startAt: 1 });
 
 module.exports = mongoose.model('Booking', bookingSchema);

@@ -1,5 +1,5 @@
 const Joi = require('joi');
-const { RESOURCE_TYPES, LEVELS } = require('../../common/constants');
+const { RESOURCE_TYPES, RESOURCE_ACCESS, LEVELS } = require('../../common/constants');
 
 const createResourceSchema = Joi.object({
   title: Joi.string().required(),
@@ -12,6 +12,11 @@ const createResourceSchema = Joi.object({
   type: Joi.string().valid(...RESOURCE_TYPES).required(),
   fileUrl: Joi.string().allow(''),
   isActive: Joi.boolean(),
+  accessType: Joi.string().valid(...Object.values(RESOURCE_ACCESS)),
+  price: Joi.number().min(0),
+  currency: Joi.string().length(3).uppercase(),
+  isDownloadable: Joi.boolean(),
+  downloadableUntil: Joi.date().iso().allow('', null),
 });
 
 module.exports = { createResourceSchema };

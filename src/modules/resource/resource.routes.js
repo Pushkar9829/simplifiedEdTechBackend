@@ -11,6 +11,7 @@ const router = express.Router();
 router.get('/', authenticate, controller.list);
 router.get('/bookmarks/me', authenticate, authorize(ROLES.STUDENT), controller.myBookmarks);
 router.get('/:id', authenticate, controller.getById);
+router.get('/:id/download', authenticate, controller.download);
 router.post(
   '/',
   authenticate,
@@ -19,9 +20,16 @@ router.post(
   validate(createResourceSchema),
   controller.create
 );
-router.patch('/:id', authenticate, authorize(ROLES.ADMIN, ROLES.TUTOR), controller.update);
-router.delete('/:id', authenticate, authorize(ROLES.ADMIN), controller.remove);
+router.patch(
+  '/:id',
+  authenticate,
+  authorize(ROLES.ADMIN, ROLES.TUTOR),
+  upload.single('file'),
+  controller.update
+);
+router.delete('/:id', authenticate, authorize(ROLES.ADMIN, ROLES.TUTOR), controller.remove);
 router.post('/:id/bookmark', authenticate, authorize(ROLES.STUDENT), controller.bookmark);
 router.delete('/:id/bookmark', authenticate, authorize(ROLES.STUDENT), controller.unbookmark);
+router.post('/:id/purchase', authenticate, authorize(ROLES.STUDENT, ROLES.PARENT), controller.purchase);
 
 module.exports = router;

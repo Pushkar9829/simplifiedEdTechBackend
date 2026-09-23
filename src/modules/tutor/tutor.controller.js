@@ -28,6 +28,11 @@ const myOfferings = asyncHandler(async (req, res) => {
   return success(res, data);
 });
 
+const removeOffering = asyncHandler(async (req, res) => {
+  const data = await tutorService.removeOffering(req.user.id, req.params.id);
+  return success(res, data, 'Offering removed');
+});
+
 const addAvailability = asyncHandler(async (req, res) => {
   const data = await tutorService.addAvailability(req.user.id, req.body);
   return created(res, data, 'Availability added');
@@ -43,22 +48,47 @@ const removeAvailability = asyncHandler(async (req, res) => {
   return success(res, data, 'Availability removed');
 });
 
+const myVerification = asyncHandler(async (req, res) => {
+  const data = await tutorService.getMyVerification(req.user.id);
+  return success(res, data);
+});
+
+const saveReferences = asyncHandler(async (req, res) => {
+  const data = await tutorService.saveReferences(req.user.id, req.body.references);
+  return success(res, data, 'References saved');
+});
+
+const sendReferenceOtp = asyncHandler(async (req, res) => {
+  const data = await tutorService.sendReferenceOtp(req.user.id, Number(req.params.idx));
+  return success(res, data, data.message);
+});
+
+const verifyReferenceOtp = asyncHandler(async (req, res) => {
+  const data = await tutorService.verifyReferenceOtp(req.user.id, Number(req.params.idx), req.body.otp);
+  return success(res, data, 'Reference verified');
+});
+
 const submitVerification = asyncHandler(async (req, res) => {
   const data = await tutorService.submitVerification(req.user.id, req.files || {}, req.body.notes);
   return created(res, data, 'Verification submitted');
 });
 
-const pendingVerifications = asyncHandler(async (_req, res) => {
-  const data = await tutorService.pendingVerifications();
+const removeVerificationDocument = asyncHandler(async (req, res) => {
+  const data = await tutorService.removeVerificationDocument(
+    req.user.id,
+    req.params.field,
+    req.params.docId
+  );
+  return success(res, data, 'Document removed');
+});
+
+const pendingVerifications = asyncHandler(async (req, res) => {
+  const data = await tutorService.listVerifications(req.query.status);
   return success(res, data);
 });
 
 const reviewVerification = asyncHandler(async (req, res) => {
-  const data = await tutorService.adminReviewVerification(
-    req.params.id,
-    req.body.status,
-    req.body.adminNote
-  );
+  const data = await tutorService.adminReviewVerification(req.params.id, req.body);
   return success(res, data, 'Verification reviewed');
 });
 
@@ -90,6 +120,11 @@ const addLessonPlan = asyncHandler(async (req, res) => {
 const updateLessonPlan = asyncHandler(async (req, res) => {
   const data = await tutorService.updateLessonPlan(req.user.id, req.params.planId, req.body);
   return success(res, data, 'Lesson plan updated');
+});
+
+const getLessonPlan = asyncHandler(async (req, res) => {
+  const data = await tutorService.getLessonPlan(req.user.id, req.params.planId);
+  return success(res, data);
 });
 
 const listLessonPlans = asyncHandler(async (req, res) => {
@@ -124,10 +159,16 @@ module.exports = {
   updateMe,
   addOffering,
   myOfferings,
+  removeOffering,
   addAvailability,
   myAvailability,
   removeAvailability,
+  myVerification,
+  saveReferences,
+  sendReferenceOtp,
+  verifyReferenceOtp,
   submitVerification,
+  removeVerificationDocument,
   pendingVerifications,
   reviewVerification,
   addReview,
@@ -136,6 +177,7 @@ module.exports = {
   removeStudentNote,
   addLessonPlan,
   updateLessonPlan,
+  getLessonPlan,
   listLessonPlans,
   removeLessonPlan,
   addVideo,
