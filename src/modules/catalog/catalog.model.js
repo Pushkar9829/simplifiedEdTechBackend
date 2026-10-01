@@ -33,8 +33,23 @@ const classLevelSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+const lookupOptionSchema = new mongoose.Schema(
+  {
+    group: { type: String, required: true, trim: true, index: true },
+    value: { type: String, required: true, trim: true },
+    label: { type: String, required: true, trim: true },
+    sortOrder: { type: Number, default: 0 },
+    isActive: { type: Boolean, default: true },
+    meta: { type: mongoose.Schema.Types.Mixed, default: {} },
+  },
+  { timestamps: true }
+);
+
+lookupOptionSchema.index({ group: 1, value: 1 }, { unique: true });
+
 module.exports = {
   Country: mongoose.model('Country', countrySchema),
   Board: mongoose.model('Board', boardSchema),
   ClassLevel: mongoose.model('ClassLevel', classLevelSchema),
+  LookupOption: mongoose.model('LookupOption', lookupOptionSchema),
 };

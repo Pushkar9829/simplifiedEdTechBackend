@@ -36,16 +36,27 @@ async function searchTutors(filters, options = {}) {
   if (filters.mode === 'offline') {
     profileQuery.teachingMode = { $in: ['offline', 'both'] };
     if (filters.city) profileQuery['location.city'] = new RegExp(filters.city, 'i');
+    if (filters.state) profileQuery['location.state'] = new RegExp(filters.state, 'i');
     if (filters.area) profileQuery['location.area'] = new RegExp(filters.area, 'i');
   }
 
   let tutorUserIds = null;
-  if (filters.subjectId || filters.level || filters.boardId || filters.classLevelId) {
+  if (filters.subjectId || filters.level || filters.boardId || filters.classLevelId || filters.category) {
     const tsQuery = {};
     if (filters.subjectId) tsQuery.subjectId = filters.subjectId;
     if (filters.level) tsQuery.level = filters.level;
     if (filters.boardId) tsQuery.boardId = filters.boardId;
     if (filters.classLevelId) tsQuery.classLevelId = filters.classLevelId;
+    if (filters.category) {
+      const Subject = require('../subject/subject.model');
+      const cats = await Subject.find({ category: filters.category, isActive: true }).select('_id');
+      tsQuery.subjectId = tsQuery.subjectId
+        ? { $eq: tsQuery.subjectId }
+        : { $in: cats.map((s) => s._id) };
+      if (tsQuery.subjectId.$in && !tsQuery.subjectId.$in.length) {
+        return { items: [], total: 0, page, limit };
+      }
+    }
     const offerings = await TutorSubject.find(tsQuery).select('tutorUserId');
     tutorUserIds = offerings.map((o) => o.tutorUserId);
     if (!tutorUserIds.length) return { items: [], total: 0, page, limit };
@@ -53,13 +64,27 @@ async function searchTutors(filters, options = {}) {
   }
 
   const nameQuery = String(filters.search || filters.q || '').trim();
+  if (filters.favoriteIds) {
+    const favIds = filters.favoriteIds.map((id) => id);
+    profileQuery.userId = profileQuery.userId?.$in
+      ? { $in: profileQuery.userId.$in.filter((id) => favIds.some((f) => String(f) === String(id))) }
+      : { $in: favIds };
+    if (!profileQuery.userId.$in.length) return { items: [], total: 0, page, limit };
+  }
+
   if (nameQuery) {
-    const named = await User.find({
+    const escaped = nameQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const userMatch = {
       role: 'tutor',
       status: 'active',
-      name: new RegExp(nameQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
       ...(profileQuery.userId ? { _id: profileQuery.userId } : {}),
-    }).select('_id');
+    };
+    if (filters.hideTutorName) {
+      userMatch.refCode = new RegExp(escaped, 'i');
+    } else {
+      userMatch.$or = [{ name: new RegExp(escaped, 'i') }, { refCode: new RegExp(escaped, 'i') }];
+    }
+    const named = await User.find(userMatch).select('_id');
     if (!named.length) return { items: [], total: 0, page, limit };
     profileQuery.userId = { $in: named.map((u) => u._id) };
   }
@@ -76,7 +101,7 @@ async function searchTutors(filters, options = {}) {
 
   const availableFrom = filters.availableFrom ? new Date(filters.availableFrom) : null;
   const availableTo = filters.availableTo ? new Date(filters.availableTo) : null;
-  if (filters.available === 'true' || availableFrom || availableTo) {
+  if (filters.available === 'true' || availableFrom || availableTo || filters.timeSlot) {
     const slotQuery = { isBooked: false, startAt: { $gte: new Date() } };
     if (filters.mode === 'online' || filters.mode === 'offline') {
       slotQuery.deliveryMode = filters.mode;
@@ -85,6 +110,24 @@ async function searchTutors(filters, options = {}) {
       slotQuery.startAt = {};
       if (availableFrom) slotQuery.startAt.$gte = availableFrom;
       if (availableTo) slotQuery.startAt.$lte = availableTo;
+    }
+    if (filters.timeSlot) {
+      const hours =
+        filters.timeSlot === 'morning'
+          ? [6, 12]
+          : filters.timeSlot === 'afternoon'
+            ? [12, 17]
+            : filters.timeSlot === 'evening'
+              ? [17, 22]
+              : null;
+      if (hours) {
+        slotQuery.$expr = {
+          $and: [
+            { $gte: [{ $hour: '$startAt' }, hours[0]] },
+            { $lt: [{ $hour: '$startAt' }, hours[1]] },
+          ],
+        };
+      }
     }
     if (profileQuery.userId?.$in) {
       slotQuery.tutorUserId = { $in: profileQuery.userId.$in };
@@ -95,10 +138,15 @@ async function searchTutors(filters, options = {}) {
     profileQuery.userId = { $in: availableIds };
   }
 
+  await TutorProfile.updateMany(
+    { isPremium: true, premiumUntil: { $lte: new Date() } },
+    { isPremium: false, premiumRank: 0 }
+  );
+
   const [profiles, total] = await Promise.all([
     TutorProfile.find(profileQuery)
-      .populate('userId', 'name phone avatar country timezone')
-      .sort({ ratingAvg: -1 })
+      .populate('userId', 'name avatar country timezone refCode')
+      .sort({ isPremium: -1, premiumRank: -1, ratingAvg: -1 })
       .skip(skip)
       .limit(limit),
     TutorProfile.countDocuments(profileQuery),
@@ -121,7 +169,7 @@ async function searchTutors(filters, options = {}) {
 async function getTutorDetail(tutorUserId) {
   const profile = await TutorProfile.findOne({ userId: tutorUserId }).populate(
     'userId',
-    'name phone avatar country timezone'
+    'name avatar country timezone refCode'
   );
   if (!profile) return null;
   const [subjects, slots, reviews, verification, videos] = await Promise.all([

@@ -22,8 +22,10 @@ const planSchema = Joi.object({
   description: Joi.string().allow(''),
   price: Joi.number().min(0).required(),
   currency: Joi.string().default('USD'),
-  billingCycle: Joi.string().valid('one_time', 'monthly', 'yearly'),
+  billingCycle: Joi.string(),
   features: Joi.array().items(Joi.string()),
+  audience: Joi.string(),
+  rankBoost: Joi.number().min(0).max(100),
   isActive: Joi.boolean(),
 });
 

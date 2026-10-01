@@ -58,15 +58,60 @@ const updateClassLevel = asyncHandler(async (req, res) => {
   return success(res, data, 'Class level updated');
 });
 
+const deleteCountry = asyncHandler(async (req, res) => {
+  const data = await catalogService.deleteCountry(req.params.id);
+  return success(res, data, 'Country removed');
+});
+
+const deleteBoard = asyncHandler(async (req, res) => {
+  const data = await catalogService.deleteBoard(req.params.id);
+  return success(res, data, 'Board removed');
+});
+
+const deleteClassLevel = asyncHandler(async (req, res) => {
+  const data = await catalogService.deleteClassLevel(req.params.id);
+  return success(res, data, 'Class level removed');
+});
+
+const lookups = asyncHandler(async (req, res) => {
+  const data = await catalogService.listLookups(
+    req.query.includeInactive === 'true',
+    req.query.group
+  );
+  return success(res, data);
+});
+
+const createLookup = asyncHandler(async (req, res) => {
+  const data = await catalogService.createLookup(req.body);
+  return created(res, data, 'Option created');
+});
+
+const updateLookup = asyncHandler(async (req, res) => {
+  const data = await catalogService.updateLookup(req.params.id, req.body);
+  return success(res, data, 'Option updated');
+});
+
+const deleteLookup = asyncHandler(async (req, res) => {
+  const data = await catalogService.deleteLookup(req.params.id);
+  return success(res, data, 'Option removed');
+});
+
 module.exports = {
   countries,
   currencies,
   createCountry,
   updateCountry,
+  deleteCountry,
   boards,
   classLevels,
   createBoard,
   updateBoard,
+  deleteBoard,
   createClassLevel,
   updateClassLevel,
+  deleteClassLevel,
+  lookups,
+  createLookup,
+  updateLookup,
+  deleteLookup,
 };

@@ -4,13 +4,28 @@ const { asyncHandler } = require('../../utils/asyncHandler');
 const { storedFileUrl } = require('../../utils/mediaUrl');
 
 const search = asyncHandler(async (req, res) => {
-  const data = await tutorService.search(req.query, req.user.role);
+  const data = await tutorService.search(req.query, req.user);
   return success(res, data);
 });
 
 const getById = asyncHandler(async (req, res) => {
-  const data = await tutorService.getById(req.params.id, req.user.role);
+  const data = await tutorService.getById(req.params.id, req.user);
   return success(res, data);
+});
+
+const listFavorites = asyncHandler(async (req, res) => {
+  const data = await tutorService.listFavorites(req.user.id);
+  return success(res, data);
+});
+
+const addFavorite = asyncHandler(async (req, res) => {
+  const data = await tutorService.addFavorite(req.user.id, req.params.id);
+  return success(res, data, 'Saved to favorites');
+});
+
+const removeFavorite = asyncHandler(async (req, res) => {
+  const data = await tutorService.removeFavorite(req.user.id, req.params.id);
+  return success(res, data, 'Removed from favorites');
 });
 
 const updateMe = asyncHandler(async (req, res) => {
@@ -183,4 +198,7 @@ module.exports = {
   addVideo,
   listVideos,
   removeVideo,
+  listFavorites,
+  addFavorite,
+  removeFavorite,
 };

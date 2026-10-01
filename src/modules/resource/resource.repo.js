@@ -1,4 +1,10 @@
-const { Resource, ResourceBookmark, ResourcePurchase } = require('./resource.model');
+const {
+  Resource,
+  ResourceBookmark,
+  ResourcePurchase,
+  ResourceSuggestion,
+  ResourceReview,
+} = require('./resource.model');
 
 async function create(data) {
   return Resource.create(data);
@@ -46,7 +52,25 @@ async function listBookmarks(userId) {
 async function deleteById(id) {
   await ResourceBookmark.deleteMany({ resourceId: id });
   await ResourcePurchase.deleteMany({ resourceId: id });
+  await ResourceSuggestion.deleteMany({ resourceId: id });
   return Resource.findByIdAndDelete(id);
+}
+
+async function addSuggestion(data) {
+  return ResourceSuggestion.create(data);
+}
+
+async function listSuggestions(resourceId) {
+  return ResourceSuggestion.find({ resourceId })
+    .populate('userId', 'name refCode')
+    .sort({ createdAt: -1 });
+}
+
+async function listSuggestionsFor(resourceIds) {
+  if (!resourceIds?.length) return [];
+  return ResourceSuggestion.find({ resourceId: { $in: resourceIds } })
+    .populate('userId', 'name refCode')
+    .sort({ createdAt: -1 });
 }
 
 async function findPurchase(userId, resourceId) {
@@ -77,4 +101,19 @@ module.exports = {
   findPurchase,
   upsertPurchase,
   listPurchases,
+  addSuggestion,
+  listSuggestions,
+  listSuggestionsFor,
+  upsertReview: (data) =>
+    ResourceReview.findOneAndUpdate(
+      { resourceId: data.resourceId, userId: data.userId },
+      data,
+      { upsert: true, returnDocument: 'after' }
+    ),
+  listReviewsFor: (resourceIds) =>
+    resourceIds?.length
+      ? ResourceReview.find({ resourceId: { $in: resourceIds } })
+          .populate('userId', 'name refCode')
+          .sort({ createdAt: -1 })
+      : [],
 };

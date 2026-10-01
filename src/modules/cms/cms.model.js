@@ -4,11 +4,7 @@ const announcementSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
     body: { type: String, required: true },
-    audience: {
-      type: String,
-      enum: ['all', 'student', 'tutor', 'parent', 'admin'],
-      default: 'all',
-    },
+    audience: { type: String, default: 'all' },
     isActive: { type: Boolean, default: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
@@ -44,11 +40,7 @@ const supportTicketSchema = new mongoose.Schema(
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     subject: { type: String, required: true },
     description: { type: String, required: true },
-    category: {
-      type: String,
-      enum: ['general', 'booking', 'payment', 'tutor_dispute', 'complaint'],
-      default: 'general',
-    },
+    category: { type: String, default: 'general' },
     status: {
       type: String,
       enum: ['open', 'in_progress', 'resolved', 'closed'],

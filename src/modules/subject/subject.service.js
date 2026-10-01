@@ -5,6 +5,7 @@ const ApiError = require('../../common/ApiError');
 async function listSubjects(query) {
   const filter = {};
   if (query.includeInactive !== 'true') filter.isActive = true;
+  if (query.category) filter.category = query.category;
   return subjectRepo.list(filter, {
     page: Number(query.page) || 1,
     limit: Number(query.limit) || 100,
@@ -27,4 +28,10 @@ async function selectSubjects(studentUserId, subjectIds) {
   return profile;
 }
 
-module.exports = { listSubjects, createSubject, updateSubject, selectSubjects };
+async function deleteSubject(id) {
+  const item = await subjectRepo.deleteById(id);
+  if (!item) throw new ApiError(404, 'Subject not found');
+  return item;
+}
+
+module.exports = { listSubjects, createSubject, updateSubject, selectSubjects, deleteSubject };

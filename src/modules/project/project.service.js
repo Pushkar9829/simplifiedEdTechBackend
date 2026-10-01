@@ -2,9 +2,11 @@ const Project = require('./project.model');
 const paymentRepo = require('../payment/payment.repo');
 const parentRepo = require('../parent/parent.repo');
 const notificationService = require('../notification/notification.service');
+const { notifyParentsOfStudent } = require('../../utils/parentNotify');
 const { storedFileUrl } = require('../../utils/mediaUrl');
 const ApiError = require('../../common/ApiError');
 const { PROJECT_STATUS, PAYMENT_STATUS, ROLES } = require('../../common/constants');
+const { hideTutorContact, stripContact } = require('../../utils/tutorPrivacy');
 
 const TRANSITIONS = {
   [PROJECT_STATUS.PROPOSED]: [PROJECT_STATUS.ACCEPTED, PROJECT_STATUS.CANCELLED],
@@ -50,22 +52,36 @@ async function list(user, query) {
   }
   if (query.status) filter.status = query.status;
   if (query.kind) filter.kind = query.kind;
-  return Project.find(filter)
+  const rows = await Project.find(filter)
     .populate('studentUserId', 'name phone')
-    .populate('tutorUserId', 'name')
+    .populate('tutorUserId', 'name refCode')
+    .populate('paymentId', 'status amount currency description')
     .sort({ deliveryDate: 1 });
+  if (!hideTutorContact(user.role)) return rows;
+  return rows.map((row) => {
+    const next = typeof row.toObject === 'function' ? row.toObject() : { ...row };
+    if (next.tutorUserId) next.tutorUserId = stripContact(next.tutorUserId);
+    return next;
+  });
 }
 
 async function getById(user, id) {
   const project = await Project.findById(id)
     .populate('studentUserId', 'name phone')
-    .populate('tutorUserId', 'name');
+    .populate('tutorUserId', 'name refCode')
+    .populate('paymentId', 'status amount currency description');
   if (!project) throw new ApiError(404, 'Project not found');
   await assertCanView(user, project);
-  return project;
+  if (!hideTutorContact(user.role)) return project;
+  const next = typeof project.toObject === 'function' ? project.toObject() : { ...project };
+  if (next.tutorUserId) next.tutorUserId = stripContact(next.tutorUserId);
+  return next;
 }
 
 async function create(tutorUserId, body, files = []) {
+  if (!(Number(body.price) > 0)) {
+    throw new ApiError(400, 'Set the fee the student will pay you');
+  }
   const project = await Project.create({
     ...body,
     tutorUserId,
@@ -74,8 +90,8 @@ async function create(tutorUserId, body, files = []) {
   });
   await notificationService.notify(
     body.studentUserId,
-    'New project',
-    `${body.name} · due ${new Date(body.deliveryDate).toLocaleDateString()}`,
+    'New project fee',
+    `${body.name} · your tutor charged a fee. Accept and pay to start. Students are not paid.`,
     'project',
     { projectId: project._id }
   );
@@ -98,21 +114,48 @@ async function setStatus(user, id, status) {
     throw new ApiError(403, 'The student or parent confirms completion');
   }
 
-  const patch = { status };
-  if (status === PROJECT_STATUS.ACCEPTED && project.price > 0 && !project.paymentId) {
-    const payment = await paymentRepo.createPayment({
-      payerUserId: idOf(project.studentUserId),
-      beneficiaryUserId: idOf(project.tutorUserId),
-      projectId: project._id,
-      amount: project.price,
-      currency: project.currency,
-      method: 'manual',
-      status: PAYMENT_STATUS.PENDING,
-      description: `Project: ${project.name}`,
-    });
-    patch.paymentId = payment._id;
+  if (status === PROJECT_STATUS.ACCEPTED && Number(project.price) > 0) {
+    let payment = project.paymentId
+      ? await paymentRepo.findPaymentById(idOf(project.paymentId))
+      : null;
+    if (!payment) {
+      payment = await paymentRepo.createPayment({
+        payerUserId: idOf(project.studentUserId),
+        beneficiaryUserId: idOf(project.tutorUserId),
+        projectId: project._id,
+        amount: project.price,
+        currency: project.currency,
+        method: 'manual',
+        status: PAYMENT_STATUS.PENDING,
+        description: `Project fee: ${project.name}`,
+      });
+      await Project.findByIdAndUpdate(id, { paymentId: payment._id });
+    }
+    if (payment.status !== PAYMENT_STATUS.PAID) {
+      const studentId = idOf(project.studentUserId);
+      await notificationService.notify(
+        studentId,
+        'Project fee due',
+        `Pay ${project.name} so your tutor can start. Students do not get paid for projects.`,
+        'payment',
+        { paymentId: payment._id, projectId: id }
+      );
+      await notifyParentsOfStudent(
+        studentId,
+        'Project fee due',
+        `Pay the tutor fee for ${project.name}. The tutor charges the student; the student is not paid.`,
+        'payment',
+        { paymentId: payment._id, projectId: id }
+      );
+      const pending = await getById(user, id);
+      const row = typeof pending.toObject === 'function' ? pending.toObject() : { ...pending };
+      row.payNow = true;
+      return row;
+    }
   }
-  const updated = await Project.findByIdAndUpdate(id, patch, { new: true });
+
+  const patch = { status };
+  const updated = await Project.findByIdAndUpdate(id, patch, { returnDocument: 'after' });
   await notificationService.notify(
     user.role === ROLES.TUTOR ? idOf(project.studentUserId) : idOf(project.tutorUserId),
     'Project update',
@@ -130,6 +173,9 @@ async function update(tutorUserId, id, body) {
   }
   if (![PROJECT_STATUS.PROPOSED, PROJECT_STATUS.ACCEPTED].includes(project.status)) {
     throw new ApiError(400, 'Only open projects can be edited');
+  }
+  if (body.price !== undefined && !(Number(body.price) > 0)) {
+    throw new ApiError(400, 'Set the fee the student will pay you');
   }
   const allowed = ['name', 'description', 'kind', 'price', 'currency', 'deliveryDate'];
   allowed.forEach((key) => {
@@ -161,7 +207,21 @@ async function deliver(tutorUserId, id, files = []) {
 }
 
 async function acceptPaid(paymentId) {
-  return Project.findOneAndUpdate({ paymentId }, { status: PROJECT_STATUS.ACCEPTED }, { new: true });
+  const project = await Project.findOneAndUpdate(
+    { paymentId },
+    { status: PROJECT_STATUS.ACCEPTED },
+    { returnDocument: 'after' }
+  );
+  if (project) {
+    await notificationService.notify(
+      project.tutorUserId,
+      'Project fee paid',
+      `${project.name} is paid. You can start the work.`,
+      'project',
+      { projectId: project._id }
+    );
+  }
+  return project;
 }
 
 module.exports = { list, getById, create, update, setStatus, deliver, acceptPaid };

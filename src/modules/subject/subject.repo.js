@@ -28,4 +28,8 @@ async function insertMany(docs) {
   return Subject.insertMany(docs, { ordered: false });
 }
 
-module.exports = { create, updateById, findById, list, insertMany };
+async function deleteById(id) {
+  return Subject.findByIdAndDelete(id);
+}
+
+module.exports = { create, updateById, findById, list, insertMany, deleteById };

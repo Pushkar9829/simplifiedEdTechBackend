@@ -13,7 +13,7 @@ async function findOrCreateConversation(participantIds) {
 
 async function listConversations(userId) {
   return Conversation.find({ participants: userId })
-    .populate('participants', 'name phone role')
+    .populate('participants', 'name phone role refCode')
     .sort({ lastMessageAt: -1 });
 }
 

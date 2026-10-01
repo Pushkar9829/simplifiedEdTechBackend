@@ -31,5 +31,18 @@ router.delete('/:id', authenticate, authorize(ROLES.ADMIN, ROLES.TUTOR), control
 router.post('/:id/bookmark', authenticate, authorize(ROLES.STUDENT), controller.bookmark);
 router.delete('/:id/bookmark', authenticate, authorize(ROLES.STUDENT), controller.unbookmark);
 router.post('/:id/purchase', authenticate, authorize(ROLES.STUDENT, ROLES.PARENT), controller.purchase);
+router.get('/:id/suggestions', authenticate, controller.suggestions);
+router.post(
+  '/:id/suggestions',
+  authenticate,
+  authorize(ROLES.STUDENT, ROLES.PARENT),
+  controller.suggest
+);
+router.post(
+  '/:id/reviews',
+  authenticate,
+  authorize(ROLES.STUDENT, ROLES.PARENT),
+  controller.review
+);
 
 module.exports = router;

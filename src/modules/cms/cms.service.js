@@ -28,6 +28,12 @@ async function listConfigs() {
   return cmsRepo.listConfigs();
 }
 
+async function deleteConfig(key) {
+  const item = await cmsRepo.deleteConfig(key);
+  if (!item) throw new ApiError(404, 'Config not found');
+  return item;
+}
+
 async function createCampaign(userId, body) {
   return cmsRepo.createCampaign({ ...body, createdBy: userId });
 }
@@ -64,6 +70,7 @@ module.exports = {
   listAnnouncements,
   setConfig,
   listConfigs,
+  deleteConfig,
   createCampaign,
   updateCampaign,
   listCampaigns,

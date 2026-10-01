@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema(
     avatar: { type: String, default: '' },
     timezone: { type: String, default: 'UTC' },
     country: { type: String, default: '' },
+    refCode: { type: String, trim: true, unique: true, sparse: true },
     status: {
       type: String,
       enum: Object.values(USER_STATUS),

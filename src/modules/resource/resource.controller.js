@@ -52,6 +52,21 @@ const download = asyncHandler(async (req, res) => {
   return success(res, data);
 });
 
+const review = asyncHandler(async (req, res) => {
+  const data = await resourceService.reviewResource(req.user, req.params.id, req.body || {});
+  return created(res, data, 'Review saved on this document');
+});
+
+const suggest = asyncHandler(async (req, res) => {
+  const data = await resourceService.suggestChange(req.user, req.params.id, req.body || {});
+  return created(res, data, 'Suggestion saved against this document');
+});
+
+const suggestions = asyncHandler(async (req, res) => {
+  const data = await resourceService.suggestions(req.params.id);
+  return success(res, data);
+});
+
 module.exports = {
   list,
   getById,
@@ -63,4 +78,7 @@ module.exports = {
   myBookmarks,
   purchase,
   download,
+  review,
+  suggest,
+  suggestions,
 };

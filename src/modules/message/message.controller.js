@@ -3,7 +3,7 @@ const { success, created } = require('../../common/response');
 const { asyncHandler } = require('../../utils/asyncHandler');
 
 const listConversations = asyncHandler(async (req, res) => {
-  const data = await messageService.listConversations(req.user.id);
+  const data = await messageService.listConversations(req.user);
   return success(res, data);
 });
 

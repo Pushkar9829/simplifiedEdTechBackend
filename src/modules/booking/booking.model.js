@@ -33,6 +33,10 @@ const bookingSchema = new mongoose.Schema(
       password: { type: String, default: '' },
       provider: { type: String, default: '' },
     },
+    classTools: {
+      docsUrl: { type: String, default: '' },
+      whiteboardUrl: { type: String, default: '' },
+    },
     meetingStatus: {
       type: String,
       enum: Object.values(MEETING_STATUS),
@@ -49,6 +53,8 @@ const bookingSchema = new mongoose.Schema(
     },
     amount: { type: Number, default: 0 },
     currency: { type: String, default: 'USD' },
+    consumed: { type: Boolean, default: false },
+    consumedReason: { type: String, default: '' },
   },
   { timestamps: true }
 );

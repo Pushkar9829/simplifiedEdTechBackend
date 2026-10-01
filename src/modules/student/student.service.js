@@ -65,6 +65,9 @@ async function getDashboard(studentUserId) {
     recentGrades,
     tutorMessages: conversations.slice(0, 5),
     studyStreak: profile?.studyStreak || 0,
+    credits: progress.credits || profile?.progressCredits || 0,
+    stars: progress.stars || profile?.progressStars || 0,
+    level: progress.level || profile?.progressLevel || 'Starter',
     recommendedStudyPlan: {
       focusTopics: progress.weakTopics || [],
       strongTopics: progress.strongTopics || [],

@@ -5,9 +5,13 @@ function toPlain(doc) {
   return { ...doc };
 }
 
+const { publicRef } = require('./refCode');
+
 function stripContact(user) {
   if (!user) return user;
   const o = toPlain(user);
+  o.refCode = publicRef(o);
+  delete o.name;
   delete o.phone;
   delete o.email;
   delete o.googleId;

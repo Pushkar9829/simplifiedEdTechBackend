@@ -14,6 +14,7 @@ const env = require('../src/config/env');
 const { connectDb } = require('../src/config/db');
 const {
   IBDP_SUBJECTS,
+  HOBBY_SUBJECTS,
   BOOKING_STATUS,
   PAYMENT_STATUS,
   ASSIGNMENT_STATUS,
@@ -40,6 +41,7 @@ const {
   StudentNote,
   LessonPlan,
   TutorVideo,
+  FavoriteTutor,
 } = require('../src/modules/tutor/tutor.model');
 const { Country, Board, ClassLevel } = require('../src/modules/catalog/catalog.model');
 const {
@@ -49,9 +51,12 @@ const {
   BankAccount,
 } = require('../src/modules/wallet/wallet.model');
 const Booking = require('../src/modules/booking/booking.model');
+const ScheduleChange = require('../src/modules/booking/scheduleChange.model');
 const SessionReport = require('../src/modules/booking/sessionReport.model');
 const { Payment, SubscriptionPlan } = require('../src/modules/payment/payment.model');
-const { Resource, ResourceBookmark, ResourcePurchase } = require('../src/modules/resource/resource.model');
+const { Resource, ResourceBookmark, ResourcePurchase, ResourceSuggestion, ResourceReview } = require('../src/modules/resource/resource.model');
+const { makeRefCode } = require('../src/utils/refCode');
+const { classToolsFor, classToolsMessage } = require('../src/utils/classTools');
 const { Assignment, Submission } = require('../src/modules/homework/homework.model');
 const { Course, CourseEnrollment } = require('../src/modules/course/course.model');
 const Project = require('../src/modules/project/project.model');
@@ -188,18 +193,22 @@ async function clearAll() {
     Assignment,
     ResourcePurchase,
     ResourceBookmark,
+    ResourceReview,
+    ResourceSuggestion,
     Resource,
     CourseEnrollment,
     Course,
     Project,
     Payment,
     SessionReport,
+    ScheduleChange,
     Booking,
     LessonPlan,
     StudentNote,
     TutorReview,
     TutorVerification,
     AvailabilitySlot,
+    FavoriteTutor,
     TutorSubject,
     ParentStudentLink,
     StudentBadge,
@@ -290,6 +299,19 @@ async function seed() {
       levels: name.includes('HL') ? ['HL'] : name.includes('SL') ? ['SL'] : ['HL', 'SL'],
       category: 'ibdp',
       description: `${name} for IB Diploma Programme`,
+      isActive: true,
+    }))
+  );
+  const hobbyDocs = await Subject.insertMany(
+    HOBBY_SUBJECTS.map((name) => ({
+      name,
+      code: name
+        .replace(/[^A-Za-z0-9]/g, '')
+        .slice(0, 8)
+        .toUpperCase(),
+      levels: ['N/A'],
+      category: 'hobby',
+      description: `${name} hobby / skill class`,
       isActive: true,
     }))
   );
@@ -434,12 +456,15 @@ async function seed() {
     hourlyRateOnline: 40,
     hourlyRateOffline: 50,
     teachingMode: 'both',
-    location: { city: 'Bengaluru', area: 'Indiranagar', address: 'Demo Learning Studio' },
+    location: { city: 'Bengaluru', state: 'Karnataka', area: 'Indiranagar', address: 'Demo Learning Studio' },
     currency: 'USD',
     ratingAvg: 4.8,
     ratingCount: 12,
     trialLessonAvailable: true,
     verificationStatus: 'approved',
+    isPremium: true,
+    premiumUntil: dayjs().add(6, 'month').toDate(),
+    premiumRank: 20,
   });
 
   await TutorProfile.create({
@@ -530,11 +555,23 @@ async function seed() {
       hourlyRateOnline: 28 + i * 2,
       hourlyRateOffline: 36 + i * 2,
       teachingMode: i % 2 === 0 ? 'both' : 'online',
-      currency: 'USD',
+      location:
+        i % 2 === 0
+          ? {
+              city: i % 4 === 0 ? 'Bengaluru' : 'Mumbai',
+              state: i % 4 === 0 ? 'Karnataka' : 'Maharashtra',
+              area: i % 4 === 0 ? 'Indiranagar' : 'Bandra',
+              address: 'Demo studio',
+            }
+          : undefined,
+      currency: i % 2 === 0 ? 'INR' : 'GBP',
       ratingAvg: 4 + (i % 10) / 10,
       ratingCount: 2 + i,
       trialLessonAvailable: i % 3 === 0,
       verificationStatus: row.status,
+      ...(i === 0 && row.status === 'approved'
+        ? { isPremium: true, premiumUntil: dayjs().add(2, 'month').toDate(), premiumRank: 10 }
+        : {}),
     });
     extraTutors.push({ user, status: row.status });
   }
@@ -561,6 +598,18 @@ async function seed() {
     };
   });
   await TutorSubject.insertMany(offeringPayload);
+  if (hobbyDocs[0]) {
+    await TutorSubject.create({
+      tutorUserId: tutor._id,
+      subjectId: hobbyDocs[0]._id,
+      level: 'N/A',
+      hourlyRate: 25,
+      onlineRate: 25,
+      offlineRate: 32,
+      currency: 'USD',
+      countryId: india._id,
+    });
+  }
 
   for (let i = 0; i < extraTutors.length; i += 1) {
     const subj = coreSubjects[i % coreSubjects.length];
@@ -576,6 +625,17 @@ async function seed() {
       boardId: ibBoard._id,
       classLevelId: dp2._id,
     });
+    if (hobbyDocs[i] && extraTutors[i].status === 'approved') {
+      await TutorSubject.create({
+        tutorUserId: extraTutors[i].user._id,
+        subjectId: hobbyDocs[i]._id,
+        level: 'N/A',
+        hourlyRate: 22 + i,
+        onlineRate: 22 + i,
+        offlineRate: 28 + i,
+        currency: extraTutors[i].user.country === 'India' ? 'INR' : 'GBP',
+      });
+    }
   }
   console.log(`Offerings: ${offeringPayload.length} for demo tutor`);
 
@@ -602,6 +662,7 @@ async function seed() {
           ? {
               label: 'Demo Learning Studio',
               city: 'Bengaluru',
+              state: 'Karnataka',
               area: 'Indiranagar',
               address: '12, 7th Main',
             }
@@ -772,8 +833,43 @@ async function seed() {
       completedAt: status === BOOKING_STATUS.COMPLETED ? start.add(1, 'hour').toDate() : undefined,
       bookedByUserId: i % 5 === 0 ? parent._id : stu._id,
     });
+    if (deliveryMode === 'online') {
+      booking.classTools = classToolsFor(booking._id, subj.name);
+      await booking.save();
+    }
     bookings.push(booking);
   }
+
+  const demoPast = dayjs().subtract(1, 'day').hour(16).minute(0);
+  const demoDone = await Booking.create({
+    studentUserId: student._id,
+    tutorUserId: tutor._id,
+    subjectId: coreSubjects[0]._id,
+    level: 'HL',
+    startAt: demoPast.toDate(),
+    endAt: demoPast.add(1, 'hour').toDate(),
+    timezone: 'Asia/Kolkata',
+    status: BOOKING_STATUS.COMPLETED,
+    amount: 40,
+    currency: 'USD',
+    notes: `${coreSubjects[0].name} completed demo`,
+    attendance: 'present',
+    deliveryMode: 'online',
+    meetingUrl: 'https://zoom.us/j/84512345999',
+    zoom: {
+      meetingId: '84512345999',
+      joinUrl: 'https://zoom.us/j/84512345999',
+      startUrl: 'https://zoom.us/s/84512345999',
+      password: 'seed99',
+      provider: 'demo',
+    },
+    meetingStatus: 'ended',
+    completedAt: demoPast.add(1, 'hour').toDate(),
+    bookedByUserId: student._id,
+  });
+  demoDone.classTools = classToolsFor(demoDone._id, coreSubjects[0].name);
+  await demoDone.save();
+  bookings.push(demoDone);
 
   const completedBookings = bookings.filter((b) => b.status === BOOKING_STATUS.COMPLETED);
   for (const booking of completedBookings.slice(0, 6)) {
@@ -919,6 +1015,29 @@ async function seed() {
       billingCycle: 'yearly',
       features: ['Weekly lessons', 'IA support'],
       isActive: true,
+      audience: 'student',
+    },
+    {
+      name: 'Tutor Premium',
+      description: 'Rank higher in student search for 1 month',
+      price: 49,
+      currency: 'USD',
+      billingCycle: 'monthly',
+      features: ['Top of search', 'Premium badge'],
+      isActive: true,
+      audience: 'tutor',
+      rankBoost: 20,
+    },
+    {
+      name: 'Tutor Premium Year',
+      description: 'Rank higher in student search for 12 months',
+      price: 399,
+      currency: 'USD',
+      billingCycle: 'yearly',
+      features: ['Top of search', 'Premium badge'],
+      isActive: true,
+      audience: 'tutor',
+      rankBoost: 30,
     },
     {
       name: 'Family Plan',
@@ -1186,6 +1305,18 @@ async function seed() {
       resourceId: r._id,
     }))
   );
+  await ResourceSuggestion.insertMany(
+    resources.slice(0, 4).map((r, i) => ({
+      resourceId: r._id,
+      userId: student._id,
+      body:
+        i % 2 === 0
+          ? 'Please add the latest markscheme worked example on page 3.'
+          : 'The diagram on question 2 does not match the 2025 syllabus wording.',
+      status: i === 0 ? 'reviewed' : 'open',
+    }))
+  );
+  await FavoriteTutor.create({ studentUserId: student._id, tutorUserId: tutor._id });
   await ResourcePurchase.insertMany(
     resources
       .filter((r) => r.accessType === RESOURCE_ACCESS.PAID)
@@ -1264,8 +1395,8 @@ async function seed() {
       badgeId: b._id,
     }))
   );
-  await ProgressRecord.insertMany(
-    allStudents.slice(0, 12).map((s, i) => ({
+  await ProgressRecord.insertMany([
+    ...allStudents.slice(0, 12).map((s, i) => ({
       studentUserId: s._id,
       subjectId: coreSubjects[i % coreSubjects.length]._id,
       topic: topics[i % topics.length],
@@ -1273,8 +1404,17 @@ async function seed() {
       scoreLabel: 'grade',
       scoreValue: 4 + (i % 4),
       hours: 1 + (i % 5),
-    }))
-  );
+    })),
+    ...[6, 7, 6, 5, 7].map((score, i) => ({
+      studentUserId: student._id,
+      subjectId: coreSubjects[i % coreSubjects.length]._id,
+      topic: topics[i % topics.length],
+      metricType: 'homework',
+      scoreLabel: String(score),
+      scoreValue: score,
+      hours: 0,
+    })),
+  ]);
 
   await ParentStudentLink.insertMany([
     { parentUserId: parent._id, studentUserId: student._id, relationship: 'parent', status: 'active' },
@@ -1306,6 +1446,25 @@ async function seed() {
       conversationId: convoStudent._id,
       senderId: student._id,
       body: 'Also stuck on chain rule Q4.',
+      readBy: [student._id],
+    },
+    {
+      conversationId: convoStudent._id,
+      senderId: tutor._id,
+      kind: 'class_links',
+      body: classToolsMessage({
+        subjectName: coreSubjects[0]?.name || 'Class',
+        zoomJoin: bookings.find((b) => b.deliveryMode === 'online')?.meetingUrl,
+        docsUrl: bookings.find((b) => b.deliveryMode === 'online')?.classTools?.docsUrl,
+        whiteboardUrl: bookings.find((b) => b.deliveryMode === 'online')?.classTools?.whiteboardUrl,
+      }),
+      readBy: [tutor._id, student._id],
+    },
+    {
+      conversationId: convoStudent._id,
+      senderId: student._id,
+      kind: 'feedback',
+      body: 'Class feedback 5/5: Clear explanation of the chain rule.',
       readBy: [student._id],
     },
   ]);
@@ -1497,6 +1656,8 @@ async function seed() {
     }))
   );
 
+  await require('../src/modules/catalog/catalog.service').listLookups(true);
+
   await PlatformConfig.insertMany([
     { key: 'analytics.widgets', value: ['usersByRole', 'revenue', 'bookings', 'campaigns'], description: 'Enabled analytics widgets' },
     { key: 'supportEmail', value: 'support@ibdp.demo', description: 'Public support contact' },
@@ -1543,6 +1704,12 @@ async function seed() {
       };
     })
   );
+
+  const users = await User.find({ $or: [{ refCode: { $exists: false } }, { refCode: '' }, { refCode: null }] });
+  for (const u of users) {
+    u.refCode = makeRefCode(u._id);
+    await u.save();
+  }
 
   console.log('Messages, notifications, CMS seeded');
   console.log('Seed complete\n');

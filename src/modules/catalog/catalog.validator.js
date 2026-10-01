@@ -26,4 +26,13 @@ const classLevelSchema = Joi.object({
   isActive: Joi.boolean(),
 });
 
-module.exports = { countrySchema, boardSchema, classLevelSchema };
+const lookupSchema = Joi.object({
+  group: Joi.string().required(),
+  value: Joi.string().required(),
+  label: Joi.string().required(),
+  sortOrder: Joi.number(),
+  isActive: Joi.boolean(),
+  meta: Joi.object().unknown(true),
+});
+
+module.exports = { countrySchema, boardSchema, classLevelSchema, lookupSchema };

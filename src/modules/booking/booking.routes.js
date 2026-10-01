@@ -25,6 +25,14 @@ router.post(
   controller.create
 );
 router.get('/students/:studentId/insights', ...tutorOnly, controller.studentInsights);
+router.get('/schedule-changes', authenticate, controller.listScheduleChanges);
+router.get('/reschedule-entitlement', authenticate, controller.entitlement);
+router.post('/:id/reschedule/request', authenticate, controller.requestReschedule);
+router.post('/:id/reschedule/offer', authenticate, controller.offerRescheduleSlots);
+router.post('/:id/reschedule/select', authenticate, controller.selectRescheduleSlot);
+router.post('/:id/reschedule/replacement', authenticate, controller.proposeReplacement);
+router.post('/:id/reschedule/approve', authenticate, controller.approveReplacement);
+router.post('/:id/reschedule/decline', authenticate, controller.declineReschedule);
 router.post(
   '/:id/cancel',
   authenticate,
@@ -49,6 +57,12 @@ router.post(
 );
 router.put('/:id/report', ...tutorOnly, validate(reportSchema), controller.saveReport);
 router.get('/:id/join', authenticate, controller.join);
+router.post(
+  '/:id/feedback',
+  authenticate,
+  authorize(ROLES.STUDENT, ROLES.PARENT),
+  controller.feedback
+);
 router.get('/:id/summary', authenticate, controller.summary);
 router.get('/:id/chain', authenticate, controller.chain);
 

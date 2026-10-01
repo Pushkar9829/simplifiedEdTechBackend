@@ -12,9 +12,55 @@ const list = asyncHandler(async (req, res) => {
   return success(res, data);
 });
 
+const scheduleChangeService = require('./scheduleChange.service');
+
 const cancel = asyncHandler(async (req, res) => {
-  const data = await bookingService.cancelBooking(req.user, req.params.id);
-  return success(res, data, 'Booking cancelled');
+  const data = await scheduleChangeService.policyCancel(req.user, req.params.id, req.body || {});
+  return success(res, data, data.policy?.consumed ? 'Class marked consumed' : 'Booking cancelled');
+});
+
+const entitlement = asyncHandler(async (req, res) => {
+  const data = await scheduleChangeService.entitlement(req.user, req.query.studentUserId);
+  return success(res, data);
+});
+
+const requestReschedule = asyncHandler(async (req, res) => {
+  const data = await scheduleChangeService.requestReschedule(req.user, req.params.id, req.body || {});
+  return success(res, data, 'Reschedule request opened');
+});
+
+const offerRescheduleSlots = asyncHandler(async (req, res) => {
+  const data = await scheduleChangeService.offerSlots(req.user, req.params.id, req.body.slotIds || []);
+  return success(res, data, data.change?.status === 'awaiting_replacement' ? 'No slot offered' : 'Slots offered');
+});
+
+const selectRescheduleSlot = asyncHandler(async (req, res) => {
+  const data = await scheduleChangeService.selectSlot(req.user, req.params.id, req.body.slotId);
+  return success(res, data, 'Class rescheduled');
+});
+
+const proposeReplacement = asyncHandler(async (req, res) => {
+  const data = await scheduleChangeService.proposeReplacement(
+    req.user,
+    req.params.id,
+    req.body.tutorUserId
+  );
+  return success(res, data, 'Replacement tutor proposed');
+});
+
+const approveReplacement = asyncHandler(async (req, res) => {
+  const data = await scheduleChangeService.approveReplacement(req.user, req.params.id);
+  return success(res, data, 'Replacement confirmed');
+});
+
+const declineReschedule = asyncHandler(async (req, res) => {
+  const data = await scheduleChangeService.declineChange(req.user, req.params.id);
+  return success(res, data, data.message);
+});
+
+const listScheduleChanges = asyncHandler(async (req, res) => {
+  const data = await scheduleChangeService.listMine(req.user);
+  return success(res, data);
 });
 
 const reschedule = asyncHandler(async (req, res) => {
@@ -52,6 +98,11 @@ const join = asyncHandler(async (req, res) => {
   return success(res, data);
 });
 
+const feedback = asyncHandler(async (req, res) => {
+  const data = await bookingService.sendFeedback(req.user, req.params.id, req.body || {});
+  return success(res, data, 'Feedback sent to your tutor');
+});
+
 const summary = asyncHandler(async (req, res) => {
   const data = await bookingService.bookingSummary(req.user, req.params.id);
   return success(res, data);
@@ -77,7 +128,16 @@ module.exports = {
   complete,
   saveReport,
   join,
+  feedback,
   summary,
   chain,
   studentInsights,
+  entitlement,
+  requestReschedule,
+  offerRescheduleSlots,
+  selectRescheduleSlot,
+  proposeReplacement,
+  approveReplacement,
+  declineReschedule,
+  listScheduleChanges,
 };

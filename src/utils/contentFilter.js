@@ -11,8 +11,25 @@ const PATTERNS = [
   },
 ];
 
+const ALLOWED_LINK =
+  /https?:\/\/(?:[\w-]+\.)*(?:zoom\.us|docs\.google\.com|excalidraw\.com)[^\s]*/gi;
+
+function stashAllowedLinks(text) {
+  const kept = [];
+  const next = String(text || '').replace(ALLOWED_LINK, (m) => {
+    kept.push(m);
+    return `[[CLASSLINK${kept.length - 1}]]`;
+  });
+  return { text: next, kept };
+}
+
+function restoreAllowedLinks(text, kept) {
+  return String(text || '').replace(/\[\[CLASSLINK(\d+)\]\]/g, (_, i) => kept[Number(i)] || '');
+}
+
 function maskText(input) {
-  let text = String(input || '');
+  const stashed = stashAllowedLinks(input);
+  let text = stashed.text;
   let flagged = false;
   const hits = [];
   for (const p of PATTERNS) {
@@ -25,7 +42,7 @@ function maskText(input) {
     }
     p.re.lastIndex = 0;
   }
-  return { text: text.trim(), flagged, hits };
+  return { text: restoreAllowedLinks(text, stashed.kept).trim(), flagged, hits };
 }
 
 function maskFileName(name) {

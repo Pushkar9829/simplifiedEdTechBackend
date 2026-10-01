@@ -33,6 +33,10 @@ async function listConfigs() {
   return PlatformConfig.find().sort({ key: 1 });
 }
 
+async function deleteConfig(key) {
+  return PlatformConfig.findOneAndDelete({ key });
+}
+
 async function createCampaign(data) {
   return CampaignMetric.create(data);
 }
@@ -66,6 +70,7 @@ module.exports = {
   setConfig,
   getConfig,
   listConfigs,
+  deleteConfig,
   createCampaign,
   updateCampaign,
   listCampaigns,

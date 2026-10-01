@@ -21,6 +21,7 @@ router.patch(
 
 router.get('/configs', authenticate, authorize(ROLES.ADMIN), controller.listConfigs);
 router.post('/configs', authenticate, authorize(ROLES.ADMIN), controller.setConfig);
+router.delete('/configs/:key', authenticate, authorize(ROLES.ADMIN), controller.deleteConfig);
 
 router.get('/campaigns', authenticate, authorize(ROLES.ADMIN), controller.listCampaigns);
 router.post('/campaigns', authenticate, authorize(ROLES.ADMIN), controller.createCampaign);

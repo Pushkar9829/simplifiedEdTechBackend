@@ -76,10 +76,11 @@ async function list(user, query) {
   if (user.role === 'tutor' && query.studentUserId) filter.studentUserId = query.studentUserId;
   if (query.status) filter.status = query.status;
   if (query.bookingId) filter.bookingId = query.bookingId;
-  return homeworkRepo.listAssignments(filter, {
+  const page = await homeworkRepo.listAssignments(filter, {
     page: Number(query.page) || 1,
     limit: Number(query.limit) || 20,
   });
+  return { ...page, items: page.items.map((item) => sanitizeAssignment(item, user.role)) };
 }
 
 async function tutorStats(tutorUserId) {

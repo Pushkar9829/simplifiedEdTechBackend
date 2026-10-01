@@ -17,6 +17,7 @@ const messageSchema = new mongoose.Schema(
       index: true,
     },
     senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    kind: { type: String, enum: ['chat', 'class_links', 'feedback'], default: 'chat' },
     body: { type: String, required: true },
     attachments: [
       {

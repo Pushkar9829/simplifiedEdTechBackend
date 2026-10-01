@@ -9,7 +9,7 @@ async function findAssignmentById(id) {
     .populate('subjectId')
     .populate('resourceIds')
     .populate('studentUserId', 'name phone')
-    .populate('tutorUserId', 'name phone');
+    .populate('tutorUserId', 'name phone refCode');
 }
 
 async function updateAssignment(id, data) {
@@ -23,6 +23,7 @@ async function listAssignments(filter, options = {}) {
     Assignment.find(filter)
       .populate('subjectId')
       .populate('studentUserId', 'name')
+      .populate('tutorUserId', 'name refCode')
       .populate('bookingId', 'startAt timezone status')
       .sort({ deadline: 1 })
       .skip(skip)

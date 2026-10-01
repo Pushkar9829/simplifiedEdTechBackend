@@ -14,21 +14,65 @@ const {
   VERIFICATION_MAX_FILES_PER_FIELD,
 } = require('../../common/constants');
 const { toUtc } = require('../../utils/time');
-const { sanitizeTutorPayload, sanitizeTutorSearchItems } = require('../../utils/tutorPrivacy');
+const { hideTutorContact, sanitizeTutorPayload, sanitizeTutorSearchItems } = require('../../utils/tutorPrivacy');
 const { storedFileUrl } = require('../../utils/mediaUrl');
 
-async function search(query, role) {
-  const data = await tutorRepo.searchTutors(query, {
+const { FavoriteTutor } = require('./tutor.model');
+
+async function search(query, user) {
+  const role = user?.role;
+  const q = { ...query, hideTutorName: hideTutorContact(role) };
+  if (q.favorites === 'true' && user?.id) {
+    const favs = await FavoriteTutor.find({ studentUserId: user.id }).select('tutorUserId');
+    q.favoriteIds = favs.map((f) => f.tutorUserId);
+    if (!q.favoriteIds.length) return { items: [], total: 0, page: 1, limit: Number(q.limit) || 20 };
+  }
+  const data = await tutorRepo.searchTutors(q, {
     page: Number(query.page) || 1,
     limit: Number(query.limit) || 20,
   });
-  return { ...data, items: sanitizeTutorSearchItems(data.items, role) };
+  const items = sanitizeTutorSearchItems(data.items, role);
+  if (user?.id && (role === 'student' || role === 'parent')) {
+    const ids = items.map((i) => String(i.profile?.userId?._id || i.profile?.userId));
+    const favs = await FavoriteTutor.find({ studentUserId: user.id, tutorUserId: { $in: ids } });
+    const set = new Set(favs.map((f) => String(f.tutorUserId)));
+    items.forEach((i) => {
+      const id = String(i.profile?.userId?._id || i.profile?.userId);
+      i.favorite = set.has(id);
+    });
+  }
+  return { ...data, items };
 }
 
-async function getById(id, role) {
+async function getById(id, user) {
   const data = await tutorRepo.getTutorDetail(id);
   if (!data) throw new ApiError(404, 'Tutor not found');
-  return sanitizeTutorPayload(data, role);
+  const payload = sanitizeTutorPayload(data, user?.role);
+  if (user?.id && (user.role === 'student' || user.role === 'parent')) {
+    payload.favorite = Boolean(
+      await FavoriteTutor.findOne({ studentUserId: user.id, tutorUserId: id })
+    );
+  }
+  return payload;
+}
+
+async function listFavorites(studentUserId) {
+  return FavoriteTutor.find({ studentUserId }).populate({
+    path: 'tutorUserId',
+    select: 'name avatar country timezone refCode',
+  });
+}
+
+async function addFavorite(studentUserId, tutorUserId) {
+  return FavoriteTutor.findOneAndUpdate(
+    { studentUserId, tutorUserId },
+    { studentUserId, tutorUserId },
+    { upsert: true, returnDocument: 'after' }
+  );
+}
+
+async function removeFavorite(studentUserId, tutorUserId) {
+  return FavoriteTutor.findOneAndDelete({ studentUserId, tutorUserId });
 }
 
 async function updateMyProfile(userId, data) {
@@ -520,4 +564,7 @@ module.exports = {
   addVideo,
   myVideos,
   removeVideo,
+  listFavorites,
+  addFavorite,
+  removeFavorite,
 };

@@ -4,6 +4,7 @@ const parentRepo = require('../parent/parent.repo');
 const notificationService = require('../notification/notification.service');
 const { notifyParentsOfStudent } = require('../../utils/parentNotify');
 const walletService = require('../wallet/wallet.service');
+const userRepo = require('../user/user.repo');
 const ApiError = require('../../common/ApiError');
 const { PAYMENT_STATUS, ROLES, TUTOR_PAYOUT_RATE } = require('../../common/constants');
 
@@ -141,6 +142,22 @@ async function fulfillPaidPayment(payment) {
     const projectService = require('../project/project.service');
     await projectService.acceptPaid(payment._id);
   }
+  if (payment.planId) {
+    await activateTutorPremium(payment);
+  }
+}
+
+async function activateTutorPremium(payment) {
+  const plan = await paymentRepo.findPlanById(payment.planId._id || payment.planId);
+  if (!plan || plan.audience !== 'tutor') return;
+  const userId = payment.payerUserId._id || payment.payerUserId;
+  const { dayjs } = require('../../utils/time');
+  const months = plan.billingCycle === 'yearly' ? 12 : 1;
+  await userRepo.updateTutorProfile(userId, {
+    isPremium: true,
+    premiumUntil: dayjs().add(months, 'month').toDate(),
+    premiumRank: Number(plan.rankBoost || 10),
+  });
 }
 
 async function pay(user, paymentId, method = 'manual') {
@@ -226,6 +243,10 @@ async function adminSetStatus(paymentId, status, adminNote = '') {
     { paymentId, status }
   );
 
+  if (status === PAYMENT_STATUS.PAID && !payment.beneficiaryUserId) {
+    await fulfillPaidPayment(updated);
+  }
+
   if (payment.beneficiaryUserId && status === PAYMENT_STATUS.PAID) {
     await notificationService.notify(
       payment.beneficiaryUserId,
@@ -265,15 +286,27 @@ async function updatePlan(id, data) {
   return plan;
 }
 
-async function listPlans(activeOnly = true) {
-  return paymentRepo.listPlans(activeOnly ? { isActive: true } : {});
+async function listPlans(activeOnly = true, audience) {
+  const filter = {};
+  if (activeOnly) filter.isActive = true;
+  if (audience === 'tutor') filter.audience = 'tutor';
+  else if (audience === 'student') {
+    filter.$or = [{ audience: 'student' }, { audience: { $exists: false } }];
+  }
+  return paymentRepo.listPlans(filter);
 }
 
-async function subscribePlan(userId, planId) {
+async function subscribePlan(user, planId) {
   const plan = await paymentRepo.findPlanById(planId);
   if (!plan || !plan.isActive) throw new ApiError(404, 'Plan not found');
+  if (plan.audience === 'tutor' && user.role !== ROLES.TUTOR) {
+    throw new ApiError(403, 'This plan is for tutors');
+  }
+  if (plan.audience === 'student' && user.role === ROLES.TUTOR) {
+    throw new ApiError(403, 'This plan is for students');
+  }
   return paymentRepo.createPayment({
-    payerUserId: userId,
+    payerUserId: user.id,
     planId,
     amount: plan.price,
     currency: plan.currency,

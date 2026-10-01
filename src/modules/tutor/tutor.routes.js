@@ -25,6 +25,9 @@ const router = express.Router();
 const tutorOnly = [authenticate, authorize(ROLES.TUTOR)];
 
 router.get('/', authenticate, controller.search);
+router.get('/favorites', authenticate, authorize(ROLES.STUDENT, ROLES.PARENT), controller.listFavorites);
+router.post('/:id/favorite', authenticate, authorize(ROLES.STUDENT, ROLES.PARENT), controller.addFavorite);
+router.delete('/:id/favorite', authenticate, authorize(ROLES.STUDENT, ROLES.PARENT), controller.removeFavorite);
 router.get('/me/offerings', ...tutorOnly, controller.myOfferings);
 router.post('/me/offerings', ...tutorOnly, validate(offeringSchema), controller.addOffering);
 router.delete('/me/offerings/:id', ...tutorOnly, controller.removeOffering);

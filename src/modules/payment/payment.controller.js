@@ -33,12 +33,13 @@ const pay = asyncHandler(async (req, res) => {
 });
 
 const subscribe = asyncHandler(async (req, res) => {
-  const data = await paymentService.subscribePlan(req.user.id, req.body.planId);
+  const data = await paymentService.subscribePlan(req.user, req.body.planId);
   return created(res, data, 'Subscription invoice created. Use Pay to continue.');
 });
 
-const listPlans = asyncHandler(async (_req, res) => {
-  const data = await paymentService.listPlans(true);
+const listPlans = asyncHandler(async (req, res) => {
+  const audience = req.user.role === 'tutor' ? 'tutor' : req.user.role === 'admin' ? undefined : 'student';
+  const data = await paymentService.listPlans(req.user.role !== 'admin', audience);
   return success(res, data);
 });
 

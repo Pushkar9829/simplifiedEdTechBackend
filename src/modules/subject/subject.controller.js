@@ -22,4 +22,9 @@ const select = asyncHandler(async (req, res) => {
   return success(res, data, 'Subjects selected');
 });
 
-module.exports = { list, create, update, select };
+const remove = asyncHandler(async (req, res) => {
+  const data = await subjectService.deleteSubject(req.params.id);
+  return success(res, data, 'Subject removed');
+});
+
+module.exports = { list, create, update, select, remove };

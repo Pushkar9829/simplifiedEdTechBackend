@@ -13,6 +13,8 @@ const { LessonPlan } = require('../tutor/tutor.model');
 const Subject = require('../subject/subject.model');
 const notificationService = require('../notification/notification.service');
 const zoom = require('../../integrations/zoom');
+const { classToolsFor, classToolsMessage } = require('../../utils/classTools');
+const messageService = require('../message/message.service');
 const { notifyParentsOfStudent } = require('../../utils/parentNotify');
 const { sanitizeBookingItems, stripContact } = require('../../utils/tutorPrivacy');
 const ApiError = require('../../common/ApiError');
@@ -228,8 +230,19 @@ async function createBooking(actor, body) {
     if (i > 0) patch.parentBookingId = created[0]._id;
     if (b.deliveryMode === 'online') {
       const meeting = await provisionMeeting(b, subject?.name);
+      const tools = classToolsFor(b._id, subject?.name);
       patch.zoom = meeting;
       patch.meetingUrl = meeting.joinUrl || '';
+      patch.classTools = tools;
+      const text = classToolsMessage({
+        subjectName: subject?.name,
+        zoomJoin: meeting.joinUrl,
+        docsUrl: tools.docsUrl,
+        whiteboardUrl: tools.whiteboardUrl,
+      });
+      await messageService
+        .sendOfficial(body.tutorUserId, studentUserId, text, 'class_links')
+        .catch((err) => console.error('[class-tools] message failed:', err.message));
     }
     if (Object.keys(patch).length) {
       await bookingRepo.updateById(b._id, patch);
@@ -566,6 +579,17 @@ async function joinBooking(user, id) {
     await bookingRepo.updateById(id, { meetingStatus: MEETING_STATUS.LIVE, startedAt: new Date() });
   }
 
+  let tools = booking.classTools || {};
+  if (!tools.docsUrl || !tools.whiteboardUrl) {
+    const subject = await Subject.findById(booking.subjectId).select('name');
+    const generated = classToolsFor(booking._id, subject?.name);
+    tools = {
+      docsUrl: tools.docsUrl || generated.docsUrl,
+      whiteboardUrl: tools.whiteboardUrl || generated.whiteboardUrl,
+    };
+    await bookingRepo.updateById(id, { classTools: tools });
+  }
+
   const joinUrl = booking.zoom?.joinUrl || booking.meetingUrl;
   return {
     deliveryMode: 'online',
@@ -575,7 +599,31 @@ async function joinBooking(user, id) {
     provider: booking.zoom?.provider || 'demo',
     opensAt: new Date(opensAt),
     location: null,
+    classTools: tools,
   };
+}
+
+async function sendFeedback(user, bookingId, body = {}) {
+  const booking = await loadViewableBooking(user, bookingId);
+  if (!(await canManageStudentBooking(user, booking))) throw new ApiError(403, 'Only the student or parent can send feedback');
+  if (booking.status !== BOOKING_STATUS.COMPLETED && new Date(booking.endAt) > new Date()) {
+    throw new ApiError(400, 'Feedback is available after the class');
+  }
+  const rating = Number(body.rating);
+  const comment = String(body.comment || '').trim();
+  if (!rating || rating < 1 || rating > 5) throw new ApiError(400, 'Give a rating from 1 to 5');
+  const text = `Class feedback ${rating}/5${comment ? `: ${comment}` : ''}`;
+  await messageService.sendOfficial(user.id, idOf(booking.tutorUserId), text, 'feedback');
+  try {
+    const tutorService = require('../tutor/tutor.service');
+    await tutorService.addReview(idOf(booking.studentUserId), idOf(booking.tutorUserId), {
+      rating,
+      comment,
+    });
+  } catch {
+    /* review may already exist or require a paid session */
+  }
+  return { ok: true, rating };
 }
 
 async function reportsForBookings(bookingIds) {
@@ -696,6 +744,7 @@ module.exports = {
   completeBooking,
   saveReport,
   joinBooking,
+  sendFeedback,
   bookingSummary,
   bookingChain,
   studentInsights,

@@ -8,21 +8,21 @@ const { ROLES } = require('../../common/constants');
 const router = express.Router();
 
 router.get('/plans', authenticate, controller.listPlans);
-router.get('/payable', authenticate, authorize(ROLES.STUDENT, ROLES.PARENT), controller.payable);
+router.get('/payable', authenticate, authorize(ROLES.STUDENT, ROLES.PARENT, ROLES.TUTOR), controller.payable);
 router.get('/history', authenticate, controller.history);
 router.get('/earnings', authenticate, authorize(ROLES.TUTOR), controller.earnings);
 router.get('/earnings/summary', authenticate, authorize(ROLES.TUTOR), controller.earningsSummary);
 router.post(
   '/:id/pay',
   authenticate,
-  authorize(ROLES.STUDENT, ROLES.PARENT),
+  authorize(ROLES.STUDENT, ROLES.PARENT, ROLES.TUTOR),
   validate(paySchema),
   controller.pay
 );
 router.post(
   '/subscribe',
   authenticate,
-  authorize(ROLES.STUDENT, ROLES.PARENT),
+  authorize(ROLES.STUDENT, ROLES.PARENT, ROLES.TUTOR),
   validate(subscribeSchema),
   controller.subscribe
 );

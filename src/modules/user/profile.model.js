@@ -11,6 +11,9 @@ const studentProfileSchema = new mongoose.Schema(
     studyStreak: { type: Number, default: 0 },
     lastActivityDate: { type: String, default: '' },
     predictedGrades: { type: Map, of: String, default: {} },
+    progressCredits: { type: Number, default: 0 },
+    progressStars: { type: Number, default: 0 },
+    progressLevel: { type: String, default: 'Starter' },
   },
   { timestamps: true }
 );
@@ -34,6 +37,7 @@ const tutorProfileSchema = new mongoose.Schema(
     },
     location: {
       city: { type: String, default: '' },
+      state: { type: String, default: '' },
       area: { type: String, default: '' },
       address: { type: String, default: '' },
       lat: { type: Number },
@@ -42,6 +46,9 @@ const tutorProfileSchema = new mongoose.Schema(
     currency: { type: String, default: 'USD' },
     ratingAvg: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 },
+    isPremium: { type: Boolean, default: false, index: true },
+    premiumUntil: { type: Date },
+    premiumRank: { type: Number, default: 0 },
     trialLessonAvailable: { type: Boolean, default: true },
     verificationStatus: {
       type: String,

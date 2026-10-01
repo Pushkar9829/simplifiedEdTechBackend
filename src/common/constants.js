@@ -70,6 +70,8 @@ const DELIVERY_MODES = {
 };
 
 const BOOKING_MIN_LEAD_HOURS = 12;
+const CANCEL_NOTICE_HOURS = 24;
+const STUDENT_RESCHEDULES_PER_MONTH = 1;
 const PLATFORM_COMMISSION_RATE = 0.25;
 const TUTOR_PAYOUT_RATE = 0.75;
 
@@ -151,6 +153,21 @@ const IBDP_SUBJECTS = [
   'Creativity, Activity, Service (CAS)',
 ];
 
+const HOBBY_SUBJECTS = [
+  'Chess',
+  'Guitar',
+  'Keyboard',
+  'Drums',
+  'Carnatic Music',
+  'C++ Coding',
+  'Programming',
+  'Python',
+  'Java',
+  'SAP',
+  'Cloud Computing',
+  'Art and Craft',
+];
+
 module.exports = {
   ROLES,
   USER_STATUS,
@@ -168,6 +185,8 @@ module.exports = {
   TEACHING_MODES,
   DELIVERY_MODES,
   BOOKING_MIN_LEAD_HOURS,
+  CANCEL_NOTICE_HOURS,
+  STUDENT_RESCHEDULES_PER_MONTH,
   PLATFORM_COMMISSION_RATE,
   TUTOR_PAYOUT_RATE,
   WALLET_OWNER,
@@ -178,4 +197,5 @@ module.exports = {
   RESOURCE_ACCESS,
   RESOURCE_TYPES,
   IBDP_SUBJECTS,
+  HOBBY_SUBJECTS,
 };

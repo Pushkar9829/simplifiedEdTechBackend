@@ -18,6 +18,25 @@ function scoreToIbGrade(avg) {
   return '1';
 }
 
+function rewardsFromRecords(records = []) {
+  let credits = 0;
+  let sum = 0;
+  let n = 0;
+  for (const r of records) {
+    if (r.metricType === 'hours') continue;
+    const v = Number(r.scoreValue || 0);
+    if (v <= 0) continue;
+    n += 1;
+    sum += v;
+    credits += v >= 6 ? 15 : v >= 5 ? 10 : v >= 4 ? 5 : 2;
+  }
+  const avg = n ? sum / n : 0;
+  const stars = !n ? 0 : avg >= 6.5 ? 5 : avg >= 5.5 ? 4 : avg >= 4.5 ? 3 : avg >= 3.5 ? 2 : 1;
+  const level =
+    credits >= 200 ? 'Star' : credits >= 100 ? 'Achiever' : credits >= 50 ? 'Rising' : 'Starter';
+  return { credits, stars, level, avgScore: avg };
+}
+
 async function touchStudyStreak(studentUserId) {
   const profile = await userRepo.getStudentProfile(studentUserId);
   const today = dayjs().format('YYYY-MM-DD');
@@ -79,6 +98,19 @@ async function myProgress(studentUserId) {
     .filter((r) => r.scoreValue >= 6)
     .map((r) => r.topic)
     .filter(Boolean);
+  const rewards = rewardsFromRecords(records);
+  if (
+    profile &&
+    (profile.progressCredits !== rewards.credits ||
+      profile.progressStars !== rewards.stars ||
+      profile.progressLevel !== rewards.level)
+  ) {
+    await userRepo.updateStudentProfile(studentUserId, {
+      progressCredits: rewards.credits,
+      progressStars: rewards.stars,
+      progressLevel: rewards.level,
+    });
+  }
 
   return {
     records,
@@ -88,6 +120,9 @@ async function myProgress(studentUserId) {
     strongTopics: [...new Set(strongTopics)].slice(0, 10),
     studyStreak: profile?.studyStreak || 0,
     predictedGrades: profile?.predictedGrades || {},
+    credits: rewards.credits,
+    stars: rewards.stars,
+    level: rewards.level,
   };
 }
 

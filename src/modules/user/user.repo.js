@@ -1,5 +1,6 @@
 const User = require('./user.model');
 const { StudentProfile, TutorProfile, ParentProfile } = require('./profile.model');
+const { makeRefCode } = require('../../utils/refCode');
 
 async function findById(id) {
   return User.findById(id);
@@ -15,7 +16,12 @@ async function findByEmail(email) {
 }
 
 async function create(data) {
-  return User.create(data);
+  const user = await User.create(data);
+  if (!user.refCode) {
+    user.refCode = makeRefCode(user._id);
+    await user.save();
+  }
+  return user;
 }
 
 async function updateById(id, data) {

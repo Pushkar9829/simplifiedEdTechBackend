@@ -7,7 +7,7 @@ const list = asyncHandler(async (req, res) => {
   const data =
     req.user.role === 'tutor' && req.query.mine === 'true'
       ? await courseService.listMine(req.user.id)
-      : await courseService.listPublished(req.query);
+      : await courseService.listPublished(req.query, req.user.role);
   return success(res, data);
 });
 
@@ -17,7 +17,7 @@ const mine = asyncHandler(async (req, res) => {
 });
 
 const enrollments = asyncHandler(async (req, res) => {
-  const data = await courseService.myEnrollments(req.user.id);
+  const data = await courseService.myEnrollments(req.user.id, req.user.role);
   return success(res, data);
 });
 

@@ -3,16 +3,25 @@ const paymentRepo = require('../payment/payment.repo');
 const { LessonPlan } = require('../tutor/tutor.model');
 const ApiError = require('../../common/ApiError');
 const { COURSE_STATUS, PAYMENT_STATUS, ROLES } = require('../../common/constants');
+const { hideTutorContact, stripContact } = require('../../utils/tutorPrivacy');
+
+function hideCourseTutor(course, role) {
+  if (!course || !hideTutorContact(role)) return course;
+  const row = typeof course.toObject === 'function' ? course.toObject() : { ...course };
+  if (row.tutorUserId) row.tutorUserId = stripContact(row.tutorUserId);
+  return row;
+}
 
 async function listMine(tutorUserId) {
   return courseRepo.list({ tutorUserId });
 }
 
-async function listPublished(query) {
+async function listPublished(query, role) {
   const filter = { status: COURSE_STATUS.PUBLISHED };
   if (query.tutorUserId) filter.tutorUserId = query.tutorUserId;
   if (query.subjectId) filter.subjectId = query.subjectId;
-  return courseRepo.list(filter);
+  const items = await courseRepo.list(filter);
+  return items.map((c) => hideCourseTutor(c, role));
 }
 
 async function getById(id, user) {
@@ -26,7 +35,7 @@ async function getById(id, user) {
   if (user?.role === ROLES.STUDENT) {
     enrollment = await courseRepo.findEnrollment(id, user.id);
   }
-  return { course, enrollment };
+  return { course: hideCourseTutor(course, user?.role), enrollment };
 }
 
 async function create(tutorUserId, body, thumbnail) {
@@ -111,8 +120,13 @@ async function enroll(user, courseId, studentUserId) {
   return { enrollment, payment };
 }
 
-async function myEnrollments(studentUserId) {
-  return courseRepo.listEnrollments({ studentUserId });
+async function myEnrollments(studentUserId, role = 'student') {
+  const rows = await courseRepo.listEnrollments({ studentUserId });
+  return rows.map((row) => {
+    const next = typeof row.toObject === 'function' ? row.toObject() : { ...row };
+    if (next.courseId) next.courseId = hideCourseTutor(next.courseId, role);
+    return next;
+  });
 }
 
 async function activateByPayment(paymentId) {

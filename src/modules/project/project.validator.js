@@ -8,7 +8,7 @@ const createSchema = Joi.object({
   kind: Joi.string().valid('project', 'assignment'),
   name: Joi.string().required(),
   description: Joi.string().allow(''),
-  price: Joi.number().min(0),
+  price: Joi.number().min(1).required(),
   currency: Joi.string().length(3).uppercase(),
   deliveryDate: Joi.date().iso().required(),
 });
@@ -23,7 +23,7 @@ const updateSchema = Joi.object({
   name: Joi.string().min(1),
   description: Joi.string().allow(''),
   kind: Joi.string().valid('project', 'assignment'),
-  price: Joi.number().min(0),
+  price: Joi.number().min(1),
   currency: Joi.string().length(3).uppercase(),
   deliveryDate: Joi.date().iso(),
 });

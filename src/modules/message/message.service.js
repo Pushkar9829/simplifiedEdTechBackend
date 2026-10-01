@@ -6,9 +6,25 @@ const { maskText, maskFileName } = require('../../utils/contentFilter');
 const { storedFileUrl } = require('../../utils/mediaUrl');
 const ApiError = require('../../common/ApiError');
 const { ROLES } = require('../../common/constants');
+const { hideTutorContact, stripContact } = require('../../utils/tutorPrivacy');
 
-async function listConversations(userId) {
-  return messageRepo.listConversations(userId);
+function hideTutorPeople(user, rows = []) {
+  if (!hideTutorContact(user.role)) return rows;
+  return rows.map((row) => {
+    const next = typeof row.toObject === 'function' ? row.toObject() : { ...row };
+    if (next.role === 'tutor' || next.tutorUserId) return stripContact(next);
+    if (next.participants) {
+      next.participants = (next.participants || []).map((p) =>
+        p.role === 'tutor' ? stripContact(p) : p
+      );
+    }
+    return next;
+  });
+}
+
+async function listConversations(user) {
+  const rows = await messageRepo.listConversations(user.id || user);
+  return hideTutorPeople(typeof user === 'object' ? user : { role: '' }, rows);
 }
 
 async function openConversation(userId, participantId) {
@@ -38,6 +54,7 @@ async function send(userId, body, files = []) {
   const message = await messageRepo.createMessage({
     conversationId,
     senderId: userId,
+    kind: body.kind || 'chat',
     body: filtered.text,
     attachments,
     flagged: filtered.flagged,
@@ -50,7 +67,7 @@ async function send(userId, body, files = []) {
   await notificationService.notifyMany(
     recipients.map((rid) => ({
       userId: rid,
-      title: 'New message',
+      title: body.kind === 'feedback' ? 'Class feedback' : body.kind === 'class_links' ? 'Class tools' : 'New message',
       body: filtered.text.slice(0, 120),
       type: 'message',
       meta: { conversationId },
@@ -115,7 +132,7 @@ async function contacts(user) {
       const t = b.tutorUserId;
       if (t?._id) tutors.set(t._id.toString(), t);
     });
-    return { tutors: [...tutors.values()], students: [], parents: [] };
+    return { tutors: hideTutorPeople(user, [...tutors.values()]), students: [], parents: [] };
   }
   if (user.role === ROLES.PARENT) {
     const ids = await parentRepo.listLinkedStudentIds(user.id);
@@ -125,9 +142,13 @@ async function contacts(user) {
       const t = b.tutorUserId;
       if (t?._id) tutors.set(t._id.toString(), t);
     });
-    return { tutors: [...tutors.values()], students: [], parents: [] };
+    return { tutors: hideTutorPeople(user, [...tutors.values()]), students: [], parents: [] };
   }
   return { students: [], parents: [], tutors: [] };
 }
 
-module.exports = { listConversations, openConversation, send, listMessages, markRead, contacts };
+async function sendOfficial(senderId, participantId, text, kind = 'class_links') {
+  return send(senderId, { participantId, body: text, kind });
+}
+
+module.exports = { listConversations, openConversation, send, sendOfficial, listMessages, markRead, contacts };

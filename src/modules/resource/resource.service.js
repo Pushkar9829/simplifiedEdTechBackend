@@ -51,7 +51,26 @@ async function list(query, user) {
     search: query.search,
   });
   const bought = await purchasedSet(user);
-  return { ...page, items: page.items.map((item) => shape(item, user, bought)) };
+  const items = page.items.map((item) => shape(item, user, bought));
+  const suggestions = await resourceRepo.listSuggestionsFor(items.map((i) => i._id));
+  const byResource = {};
+  for (const s of suggestions) {
+    const key = String(s.resourceId);
+    if (!byResource[key]) byResource[key] = [];
+    byResource[key].push(s);
+  }
+  const reviews = await resourceRepo.listReviewsFor(items.map((i) => i._id));
+  const reviewsBy = {};
+  for (const r of reviews) {
+    const key = String(r.resourceId);
+    if (!reviewsBy[key]) reviewsBy[key] = [];
+    reviewsBy[key].push(r);
+  }
+  items.forEach((item) => {
+    item.suggestions = byResource[String(item._id)] || [];
+    item.reviews = reviewsBy[String(item._id)] || [];
+  });
+  return { ...page, items };
 }
 
 async function getById(id, user) {
@@ -151,6 +170,42 @@ async function download(user, id) {
   return { fileUrl: resource.fileUrl, title: resource.title };
 }
 
+async function suggestChange(user, resourceId, body) {
+  const resource = await resourceRepo.findById(resourceId);
+  if (!resource) throw new ApiError(404, 'Resource not found');
+  const text = String(body.body || body.suggestion || '').trim();
+  if (text.length < 8) throw new ApiError(400, 'Write a short note about the change');
+  return resourceRepo.addSuggestion({
+    resourceId,
+    userId: user.id,
+    body: text.slice(0, 2000),
+  });
+}
+
+async function reviewResource(user, resourceId, body) {
+  const resource = await resourceRepo.findById(resourceId);
+  if (!resource) throw new ApiError(404, 'Resource not found');
+  const rating = Number(body.rating);
+  if (!rating || rating < 1 || rating > 5) throw new ApiError(400, 'Give a rating from 1 to 5');
+  const review = await resourceRepo.upsertReview({
+    resourceId,
+    userId: user.id,
+    rating,
+    comment: String(body.comment || '').trim().slice(0, 2000),
+  });
+  const note = String(body.suggestion || body.body || '').trim();
+  if (note.length >= 8) {
+    await resourceRepo.addSuggestion({ resourceId, userId: user.id, body: note.slice(0, 2000) });
+  }
+  return review;
+}
+
+async function suggestions(resourceId) {
+  const resource = await resourceRepo.findById(resourceId);
+  if (!resource) throw new ApiError(404, 'Resource not found');
+  return resourceRepo.listSuggestions(resourceId);
+}
+
 module.exports = {
   list,
   getById,
@@ -163,4 +218,7 @@ module.exports = {
   purchase,
   recordPurchase,
   download,
+  suggestChange,
+  reviewResource,
+  suggestions,
 };

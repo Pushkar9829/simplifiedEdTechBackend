@@ -21,6 +21,7 @@ const slotLocationSchema = new mongoose.Schema(
   {
     label: { type: String, default: '' },
     city: { type: String, default: '' },
+    state: { type: String, default: '' },
     area: { type: String, default: '' },
     address: { type: String, default: '' },
     lat: { type: Number },
@@ -143,6 +144,15 @@ const tutorVideoSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+const favoriteTutorSchema = new mongoose.Schema(
+  {
+    studentUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    tutorUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  },
+  { timestamps: true }
+);
+favoriteTutorSchema.index({ studentUserId: 1, tutorUserId: 1 }, { unique: true });
+
 module.exports = {
   TutorSubject: mongoose.model('TutorSubject', tutorSubjectSchema),
   AvailabilitySlot: mongoose.model('AvailabilitySlot', availabilitySlotSchema),
@@ -151,4 +161,5 @@ module.exports = {
   StudentNote: mongoose.model('StudentNote', studentNoteSchema),
   LessonPlan: mongoose.model('LessonPlan', lessonPlanSchema),
   TutorVideo: mongoose.model('TutorVideo', tutorVideoSchema),
+  FavoriteTutor: mongoose.model('FavoriteTutor', favoriteTutorSchema),
 };

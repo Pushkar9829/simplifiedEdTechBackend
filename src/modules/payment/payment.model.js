@@ -7,8 +7,10 @@ const subscriptionPlanSchema = new mongoose.Schema(
     description: { type: String, default: '' },
     price: { type: Number, required: true },
     currency: { type: String, default: 'USD' },
-    billingCycle: { type: String, enum: ['one_time', 'monthly', 'yearly'], default: 'one_time' },
+    billingCycle: { type: String, default: 'one_time' },
     features: [{ type: String }],
+    audience: { type: String, default: 'student' },
+    rankBoost: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

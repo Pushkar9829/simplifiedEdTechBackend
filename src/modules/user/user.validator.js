@@ -23,6 +23,7 @@ const updateMeSchema = Joi.object({
   hourlyRateOffline: Joi.number().min(0),
   location: Joi.object({
     city: Joi.string().allow(''),
+    state: Joi.string().allow(''),
     area: Joi.string().allow(''),
     address: Joi.string().allow(''),
     lat: Joi.number(),

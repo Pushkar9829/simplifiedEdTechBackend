@@ -27,6 +27,11 @@ const setConfig = asyncHandler(async (req, res) => {
   return success(res, data, 'Config saved');
 });
 
+const deleteConfig = asyncHandler(async (req, res) => {
+  const data = await cmsService.deleteConfig(req.params.key);
+  return success(res, data, 'Config removed');
+});
+
 const listCampaigns = asyncHandler(async (_req, res) => {
   const data = await cmsService.listCampaigns();
   return success(res, data);
@@ -63,6 +68,7 @@ module.exports = {
   updateAnnouncement,
   listConfigs,
   setConfig,
+  deleteConfig,
   listCampaigns,
   createCampaign,
   updateCampaign,
