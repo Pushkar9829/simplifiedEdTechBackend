@@ -23,7 +23,7 @@ router.post(
   '/:id/submit',
   authenticate,
   authorize(ROLES.STUDENT),
-  upload.array('files', 10),
+  upload.array('files', 5),
   controller.submit
 );
 router.post(

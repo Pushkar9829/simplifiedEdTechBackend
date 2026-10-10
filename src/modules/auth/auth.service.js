@@ -5,6 +5,25 @@ const { ROLES } = require('../../common/constants');
 const authRepo = require('./auth.repo');
 const userRepo = require('../user/user.repo');
 
+// Admin accounts are provisioned (seed / existing admin), never self-registered.
+function assertCanSelfRegister(role) {
+  if (role === ROLES.ADMIN) {
+    throw new ApiError(403, 'Admin accounts cannot be self-registered');
+  }
+}
+
+function assertCanLogin(user) {
+  if (user.status === 'blacklisted') {
+    throw new ApiError(403, 'This account is blocked from the platform');
+  }
+  if (user.status === 'suspended') {
+    throw new ApiError(403, 'This account is suspended');
+  }
+  if (user.status === 'inactive') {
+    throw new ApiError(403, 'This account is inactive. Contact support to reactivate it.');
+  }
+}
+
 function signToken(user) {
   return jwt.sign(
     { userId: user._id.toString(), role: user.role, phone: user.phone },
@@ -40,6 +59,7 @@ async function verifyOtp({ phone, otp, role, name }) {
 
   let user = await userRepo.findByPhone(phone);
   if (!user) {
+    assertCanSelfRegister(role);
     user = await userRepo.create({
       phone,
       role,
@@ -47,6 +67,7 @@ async function verifyOtp({ phone, otp, role, name }) {
       lastLoginAt: new Date(),
     });
   } else {
+    assertCanLogin(user);
     if (user.role !== role && user.role !== ROLES.ADMIN) {
       throw new ApiError(409, `Phone already registered as ${user.role}`);
     }
@@ -72,6 +93,7 @@ async function googleLogin({ email, name, role }) {
 
   let user = await userRepo.findByEmail(email);
   if (!user) {
+    assertCanSelfRegister(role);
     const slug = String(email)
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '')
@@ -85,6 +107,7 @@ async function googleLogin({ email, name, role }) {
       lastLoginAt: new Date(),
     });
   } else {
+    assertCanLogin(user);
     if (user.role !== role && user.role !== ROLES.ADMIN) {
       throw new ApiError(409, `Email already registered as ${user.role}`);
     }

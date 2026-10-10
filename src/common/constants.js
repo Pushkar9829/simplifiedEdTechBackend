@@ -9,6 +9,7 @@ const USER_STATUS = {
   ACTIVE: 'active',
   INACTIVE: 'inactive',
   SUSPENDED: 'suspended',
+  BLACKLISTED: 'blacklisted',
 };
 
 const VERIFICATION_STATUS = {
@@ -47,6 +48,8 @@ const PAYMENT_STATUS = {
   PAID: 'paid',
   FAILED: 'failed',
   REFUNDED: 'refunded',
+  // Unpaid invoice voided because its booking/project was cancelled.
+  CANCELLED: 'cancelled',
 };
 
 const ASSIGNMENT_STATUS = {

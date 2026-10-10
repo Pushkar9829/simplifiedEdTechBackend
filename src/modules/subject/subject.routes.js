@@ -12,6 +12,7 @@ const { ROLES } = require('../../common/constants');
 const router = express.Router();
 
 router.get('/', controller.list);
+router.get('/:id', controller.getOne);
 router.post('/', authenticate, authorize(ROLES.ADMIN), validate(createSubjectSchema), controller.create);
 router.patch('/:id', authenticate, authorize(ROLES.ADMIN), validate(updateSubjectSchema), controller.update);
 router.delete('/:id', authenticate, authorize(ROLES.ADMIN), controller.remove);

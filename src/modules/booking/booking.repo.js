@@ -32,15 +32,18 @@ async function findOverlap(tutorUserId, startAt, endAt, excludeId = null) {
 }
 
 async function list(filter, options = {}) {
-  const { page = 1, limit = 20 } = options;
+  const { page = 1, limit = 20, sort = { startAt: 1 }, includeStudentPhone = false } = options;
   const skip = (page - 1) * limit;
+  const studentFields = includeStudentPhone
+    ? 'name role timezone country phone'
+    : 'name role timezone country';
   const [items, total] = await Promise.all([
     Booking.find(filter)
       .populate('subjectId')
-      .populate('studentUserId', 'name role timezone country')
+      .populate('studentUserId', studentFields)
       .populate('tutorUserId', 'name role timezone country refCode')
       .populate('bookedByUserId', 'name role phone')
-      .sort({ startAt: 1 })
+      .sort(sort || { startAt: 1 })
       .skip(skip)
       .limit(limit),
     Booking.countDocuments(filter),

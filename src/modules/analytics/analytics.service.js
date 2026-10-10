@@ -52,7 +52,12 @@ function trendByDay(Model, dateField = 'createdAt', limit = 30, match = {}) {
     ...(Object.keys(match).length ? [{ $match: match }] : []),
     {
       $group: {
-        _id: { $dateToString: { format: '%Y-%m-%d', date: `$${dateField}` } },
+        _id: {
+          $dateToString: {
+            format: '%Y-%m-%d',
+            date: typeof dateField === 'string' ? `$${dateField}` : dateField,
+          },
+        },
         count: { $sum: 1 },
       },
     },
@@ -150,7 +155,7 @@ async function overview() {
     groupCount(Booking, 'attendance'),
     paymentRepo.revenuePaid(),
     groupCount(Payment, 'status'),
-    trendByDay(Payment, 'createdAt', 30, { status: 'paid' }),
+    trendByDay(Payment, { $ifNull: ['$paidAt', '$createdAt'] }, 30, { status: 'paid' }),
     User.countDocuments({ role: 'tutor' }),
     User.countDocuments({ role: 'student' }),
     User.countDocuments({ role: 'parent' }),
@@ -209,6 +214,11 @@ async function overview() {
   ]);
 
   const totalRevenue = (revenue || []).reduce((sum, r) => sum + (r.total || 0), 0);
+  const revenueByCurrency = (revenue || []).map((r) => ({
+    currency: r._id || 'USD',
+    total: r.total || 0,
+    count: r.count || 0,
+  }));
   const paidPaymentCount = (revenue || []).reduce((sum, r) => sum + (r.count || 0), 0);
   const totalBookings = (bookingStatus || []).reduce((sum, r) => sum + (r.count || 0), 0);
   const totalUsers = (usersByRole || []).reduce((sum, r) => sum + (r.count || 0), 0);
@@ -245,6 +255,7 @@ async function overview() {
         pendingVerifications,
         totalBookings,
         totalRevenue,
+        revenueByCurrency,
         paidPaymentCount,
         openTickets,
         activeResources,
@@ -258,6 +269,7 @@ async function overview() {
       bookingStatus,
       attendanceSummary,
       revenue,
+      revenueByCurrency,
       paymentsByStatus,
       paymentTrend,
       subjectPopularity: subjectPopularityRows,
@@ -327,8 +339,8 @@ async function overview() {
   };
 }
 
-async function getTutorPerformance(limit = 20) {
-  const tutors = await TutorProfile.find({ verificationStatus: 'approved' })
+async function getTutorPerformance(limit = 20, match = { verificationStatus: 'approved' }) {
+  const tutors = await TutorProfile.find(match)
     .populate('userId', 'name phone')
     .sort({ ratingAvg: -1 })
     .limit(limit);
@@ -362,7 +374,7 @@ async function getTutorPerformance(limit = 20) {
       { $match: { beneficiaryUserId: { $in: ids }, status: 'paid' } },
       {
         $group: {
-          _id: '$beneficiaryUserId',
+          _id: { tutor: '$beneficiaryUserId', currency: '$currency' },
           revenue: { $sum: '$amount' },
           paidCount: { $sum: 1 },
         },
@@ -394,7 +406,19 @@ async function getTutorPerformance(limit = 20) {
 
   const mapBy = (rows) => Object.fromEntries(rows.map((r) => [r._id.toString(), r]));
   const bookingMap = mapBy(bookings);
-  const earnMap = mapBy(earnings);
+  const earnMap = {};
+  for (const row of earnings) {
+    const key = row._id.tutor.toString();
+    const acc = earnMap[key] || { revenue: 0, paidCount: 0, revenueByCurrency: [] };
+    acc.revenue += row.revenue || 0;
+    acc.paidCount += row.paidCount || 0;
+    acc.revenueByCurrency.push({
+      currency: row._id.currency || 'USD',
+      total: row.revenue || 0,
+      count: row.paidCount || 0,
+    });
+    earnMap[key] = acc;
+  }
   const hwMap = mapBy(homework);
   const reviewMap = mapBy(reviews);
 
@@ -421,6 +445,7 @@ async function getTutorPerformance(limit = 20) {
       absentSessions: b.absent || 0,
       attendanceRate: total > 0 ? Math.round((present / total) * 1000) / 10 : 0,
       revenue: e.revenue || 0,
+      revenueByCurrency: e.revenueByCurrency || [],
       paidInvoices: e.paidCount || 0,
       assignmentsCreated: h.assignments || 0,
       assignmentsGraded: h.graded || 0,
@@ -435,7 +460,7 @@ async function tutorDetail(tutorUserId) {
     return null;
   }
   const oid = new mongoose.Types.ObjectId(tutorUserId);
-  const base = (await getTutorPerformance(500)).find((t) => t.tutorUserId === tutorUserId);
+  const [base] = await getTutorPerformance(1, { userId: oid });
   if (!base) return null;
 
   const [recentBookings, recentPayments, subjects, reviews] = await Promise.all([

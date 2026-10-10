@@ -15,6 +15,9 @@ const createBookingSchema = Joi.object({
   amount: Joi.number().min(0),
   studentUserId: Joi.string().hex().length(24),
   deliveryMode: Joi.string().valid('online', 'offline'),
+  planType: Joi.string().valid('single', 'regular', 'subscription'),
+  meetingProvider: Joi.string().allow(''),
+  studentAddress: Joi.object().unknown(true),
 })
   .or('slotId', 'startAt')
   .custom((value, helpers) => {

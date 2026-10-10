@@ -26,11 +26,16 @@ const catalogRoutes = require('./modules/catalog/catalog.routes');
 const walletRoutes = require('./modules/wallet/wallet.routes');
 const courseRoutes = require('./modules/course/course.routes');
 const projectRoutes = require('./modules/project/project.routes');
+const favoriteRoutes = require('./modules/favorite/favorite.routes');
 
 const app = express();
 
-app.use(helmet());
-app.use(cors());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan(env.nodeEnv === 'production' ? 'combined' : 'dev'));
@@ -59,7 +64,8 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/catalog', catalogRoutes);
 app.use('/api/wallets', walletRoutes);
 app.use('/api/courses', courseRoutes);
-app.use('/api/projects', projectRoutes);
+  app.use('/api/projects', projectRoutes);
+  app.use('/api/favorites', favoriteRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -29,6 +29,22 @@ async function adjustBalance(walletId, delta) {
   return Wallet.findByIdAndUpdate(walletId, { $inc: { balance: delta } }, { new: true });
 }
 
+// Debit only if the balance covers it; returns null when it does not (no negative balances).
+async function debitIfEnough(walletId, amount) {
+  return Wallet.findOneAndUpdate(
+    { _id: walletId, balance: { $gte: amount - 0.001 } },
+    { $inc: { balance: -amount } },
+    { new: true }
+  );
+}
+
+// Atomically move a withdrawal out of `fromStatus`; null if someone else already did.
+async function claimWithdrawal(id, fromStatus, toStatus) {
+  return Withdrawal.findOneAndUpdate({ _id: id, status: fromStatus }, { status: toStatus }, { new: true })
+    .populate('tutorUserId', 'name phone')
+    .populate('bankAccountId');
+}
+
 async function addTx(data) {
   return WalletTransaction.create(data);
 }
@@ -86,6 +102,8 @@ module.exports = {
   upsertUserWallet,
   upsertPlatformWallet,
   adjustBalance,
+  debitIfEnough,
+  claimWithdrawal,
   addTx,
   listTx,
   listAllCredits,

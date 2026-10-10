@@ -25,6 +25,26 @@ const bookingSchema = new mongoose.Schema(
     seriesId: { type: mongoose.Schema.Types.ObjectId, index: true },
     bookedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     deliveryMode: { type: String, enum: ['online', 'offline'], default: 'online' },
+    planType: { type: String, enum: ['single', 'regular', 'subscription'], default: 'single' },
+    refCode: { type: String, default: '' },
+    meetingProvider: { type: String, default: 'zoom' },
+    studentAddress: { type: mongoose.Schema.Types.Mixed, default: null },
+    doorstep: {
+      photoUrl: { type: String, default: '' },
+      placePhotoUrl: { type: String, default: '' },
+      checkedInAt: { type: Date },
+      confirmedAt: { type: Date },
+      lat: { type: Number },
+      lng: { type: Number },
+    },
+    classHistory: [
+      {
+        kind: { type: String, default: 'link' },
+        label: { type: String, default: '' },
+        url: { type: String, default: '' },
+        at: { type: Date, default: Date.now },
+      },
+    ],
     meetingUrl: { type: String, default: '' },
     zoom: {
       meetingId: { type: String, default: '' },
@@ -36,6 +56,8 @@ const bookingSchema = new mongoose.Schema(
     classTools: {
       docsUrl: { type: String, default: '' },
       whiteboardUrl: { type: String, default: '' },
+      meetUrl: { type: String, default: '' },
+      teamsUrl: { type: String, default: '' },
     },
     meetingStatus: {
       type: String,

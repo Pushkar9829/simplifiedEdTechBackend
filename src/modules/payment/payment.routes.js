@@ -20,6 +20,18 @@ router.post(
   controller.pay
 );
 router.post(
+  '/:id/refund',
+  authenticate,
+  authorize(ROLES.STUDENT, ROLES.PARENT),
+  controller.requestRefund
+);
+router.post(
+  '/:id/refund/respond',
+  authenticate,
+  authorize(ROLES.TUTOR, ROLES.ADMIN),
+  controller.respondRefund
+);
+router.post(
   '/subscribe',
   authenticate,
   authorize(ROLES.STUDENT, ROLES.PARENT, ROLES.TUTOR),
@@ -28,6 +40,7 @@ router.post(
 );
 
 router.get('/admin/all', authenticate, authorize(ROLES.ADMIN), controller.adminList);
+router.get('/admin/:id', authenticate, authorize(ROLES.ADMIN), controller.adminGet);
 router.patch(
   '/admin/:id/status',
   authenticate,

@@ -31,6 +31,8 @@ const FOLDER_BY_FIELD = {
   thumbnail: 'courses',
   deliverables: 'projects',
   file: 'media',
+  photo: 'doorstep',
+  place: 'doorstep',
 };
 
 function safeName(original) {

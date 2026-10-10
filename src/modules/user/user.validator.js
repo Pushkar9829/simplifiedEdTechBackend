@@ -31,10 +31,47 @@ const updateMeSchema = Joi.object({
   }),
   boardId: Joi.string().hex().length(24).allow('', null),
   classLevelId: Joi.string().hex().length(24).allow('', null),
+  countryId: Joi.string().hex().length(24).allow('', null),
+  preferredCurrency: Joi.string().allow(''),
+  dateOfBirth: Joi.date().iso().allow('', null),
+  sex: Joi.string().allow(''),
+  introPageUrl: Joi.string().allow(''),
+  whatsappNumber: Joi.string().allow(''),
+  needBasedClasses: Joi.boolean(),
+  meetingProvider: Joi.string().allow(''),
+  addresses: Joi.array().items(Joi.object().unknown(true)),
+  currentAddress: Joi.object().unknown(true),
+  permanentAddress: Joi.object().unknown(true),
+  emergencyContact: Joi.object({
+    name: Joi.string().allow(''),
+    relationship: Joi.string().allow(''),
+    phone: Joi.string().allow(''),
+    email: Joi.string().allow(''),
+  }),
+  identity: Joi.object({
+    type: Joi.string().allow(''),
+    number: Joi.string().allow(''),
+    documentUrl: Joi.string().allow(''),
+  }),
+  gst: Joi.object({
+    hasGst: Joi.boolean(),
+    type: Joi.string().allow(''),
+    number: Joi.string().allow(''),
+    legalName: Joi.string().allow(''),
+    registeredAddress: Joi.string().allow(''),
+    certificateUrl: Joi.string().allow(''),
+  }),
+});
+
+const blockSchema = Joi.object({
+  targetUserId: Joi.string().hex().length(24).required(),
+  reason: Joi.string().allow(''),
 });
 
 const adminStatusSchema = Joi.object({
   status: Joi.string().valid(...Object.values(USER_STATUS)).required(),
+  reason: Joi.string().allow(''),
+  voidOpen: Joi.boolean(),
 });
 
 const adminListQuerySchema = Joi.object({
@@ -45,4 +82,4 @@ const adminListQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100),
 });
 
-module.exports = { updateMeSchema, adminStatusSchema, adminListQuerySchema };
+module.exports = { updateMeSchema, adminStatusSchema, adminListQuerySchema, blockSchema };

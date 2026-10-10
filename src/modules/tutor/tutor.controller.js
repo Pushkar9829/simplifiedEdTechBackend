@@ -14,7 +14,7 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const listFavorites = asyncHandler(async (req, res) => {
-  const data = await tutorService.listFavorites(req.user.id);
+  const data = await tutorService.listFavorites(req.user.id, req.user.role);
   return success(res, data);
 });
 

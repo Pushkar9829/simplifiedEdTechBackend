@@ -19,6 +19,10 @@ async function listByUser(userId, options = {}) {
   return { items, total, page, limit };
 }
 
+async function countUnread(userId) {
+  return Notification.countDocuments({ userId, isRead: false });
+}
+
 async function markRead(id, userId) {
   return Notification.findOneAndUpdate({ _id: id, userId }, { isRead: true }, { new: true });
 }
@@ -28,4 +32,4 @@ async function markAllRead(userId) {
   return { updated: true };
 }
 
-module.exports = { create, createMany, listByUser, markRead, markAllRead };
+module.exports = { create, createMany, listByUser, countUnread, markRead, markAllRead };

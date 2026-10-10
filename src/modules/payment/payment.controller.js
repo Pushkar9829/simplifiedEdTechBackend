@@ -3,7 +3,7 @@ const { success, created } = require('../../common/response');
 const { asyncHandler } = require('../../utils/asyncHandler');
 
 const payable = asyncHandler(async (req, res) => {
-  const data = await paymentService.listPayable(req.user);
+  const data = await paymentService.listPayable(req.user, req.query);
   return success(res, data);
 });
 
@@ -48,6 +48,11 @@ const adminList = asyncHandler(async (req, res) => {
   return success(res, data);
 });
 
+const adminGet = asyncHandler(async (req, res) => {
+  const data = await paymentService.adminGet(req.params.id);
+  return success(res, data);
+});
+
 const adminSetStatus = asyncHandler(async (req, res) => {
   const data = await paymentService.adminSetStatus(
     req.params.id,
@@ -67,6 +72,16 @@ const updatePlan = asyncHandler(async (req, res) => {
   return success(res, data, 'Plan updated');
 });
 
+const requestRefund = asyncHandler(async (req, res) => {
+  const data = await paymentService.requestRefund(req.user, req.params.id, req.body || {});
+  return success(res, data, 'Refund requested');
+});
+
+const respondRefund = asyncHandler(async (req, res) => {
+  const data = await paymentService.respondRefund(req.user, req.params.id, req.body || {});
+  return success(res, data, 'Refund response saved');
+});
+
 module.exports = {
   payable,
   history,
@@ -76,7 +91,10 @@ module.exports = {
   subscribe,
   listPlans,
   adminList,
+  adminGet,
   adminSetStatus,
   createPlan,
   updatePlan,
+  requestRefund,
+  respondRefund,
 };

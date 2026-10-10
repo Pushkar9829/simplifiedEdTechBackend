@@ -9,10 +9,52 @@ const {
   LessonPlan,
   TutorVideo,
 } = require('./tutor.model');
+const { escapeRegex } = require('../../utils/regex');
+
+// A slot can be unflagged yet still clash with a booking made by time (not by slot); hide those.
+async function withoutBookedOverlaps(tutorUserId, slots) {
+  if (!slots.length) return slots;
+  const Booking = require('../booking/booking.model');
+  const first = slots.reduce((m, s) => (s.startAt < m ? s.startAt : m), slots[0].startAt);
+  const last = slots.reduce((m, s) => (s.endAt > m ? s.endAt : m), slots[0].endAt);
+  const bookings = await Booking.find({
+    tutorUserId,
+    status: { $ne: 'cancelled' },
+    startAt: { $lt: last },
+    endAt: { $gt: first },
+  }).select('startAt endAt');
+  if (!bookings.length) return slots;
+  return slots.filter((s) => !bookings.some((b) => b.startAt < s.endAt && b.endAt > s.startAt));
+}
+
+function validTimezone(tz) {
+  if (!tz || typeof tz !== 'string') return 'UTC';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    return 'UTC';
+  }
+}
 
 async function searchTutors(filters, options = {}) {
-  const { page = 1, limit = 20 } = options;
+  const page = Math.max(1, Math.floor(Number(options.page)) || 1);
+  const limit = Math.min(100, Math.max(1, Math.floor(Number(options.limit)) || 20));
   const skip = (page - 1) * limit;
+  const empty = { items: [], total: 0, page, limit };
+
+  // null = unrestricted; otherwise the set of tutor user ids still eligible.
+  let allowedIds = null;
+  const restrictTo = (ids) => {
+    const next = [...new Set(ids.map(String))];
+    if (allowedIds) {
+      const current = new Set(allowedIds);
+      allowedIds = next.filter((id) => current.has(id));
+    } else {
+      allowedIds = next;
+    }
+    return allowedIds.length > 0;
+  };
 
   const profileQuery = { verificationStatus: 'approved' };
   if (filters.minRating) profileQuery.ratingAvg = { $gte: Number(filters.minRating) };
@@ -30,17 +72,22 @@ async function searchTutors(filters, options = {}) {
     ];
   }
   if (filters.language) profileQuery.languages = filters.language;
+  if (filters.needBased === 'true' || filters.needBased === 'yes') {
+    profileQuery.needBasedClasses = { $ne: false };
+  }
+  if (filters.needBased === 'false' || filters.needBased === 'no') {
+    profileQuery.needBasedClasses = false;
+  }
   if (filters.mode === 'online') {
     profileQuery.teachingMode = { $in: ['online', 'both'] };
   }
   if (filters.mode === 'offline') {
     profileQuery.teachingMode = { $in: ['offline', 'both'] };
-    if (filters.city) profileQuery['location.city'] = new RegExp(filters.city, 'i');
-    if (filters.state) profileQuery['location.state'] = new RegExp(filters.state, 'i');
-    if (filters.area) profileQuery['location.area'] = new RegExp(filters.area, 'i');
+    if (filters.city) profileQuery['location.city'] = new RegExp(escapeRegex(filters.city), 'i');
+    if (filters.state) profileQuery['location.state'] = new RegExp(escapeRegex(filters.state), 'i');
+    if (filters.area) profileQuery['location.area'] = new RegExp(escapeRegex(filters.area), 'i');
   }
 
-  let tutorUserIds = null;
   if (filters.subjectId || filters.level || filters.boardId || filters.classLevelId || filters.category) {
     const tsQuery = {};
     if (filters.subjectId) tsQuery.subjectId = filters.subjectId;
@@ -53,51 +100,32 @@ async function searchTutors(filters, options = {}) {
       tsQuery.subjectId = tsQuery.subjectId
         ? { $eq: tsQuery.subjectId }
         : { $in: cats.map((s) => s._id) };
-      if (tsQuery.subjectId.$in && !tsQuery.subjectId.$in.length) {
-        return { items: [], total: 0, page, limit };
-      }
+      if (tsQuery.subjectId.$in && !tsQuery.subjectId.$in.length) return empty;
     }
     const offerings = await TutorSubject.find(tsQuery).select('tutorUserId');
-    tutorUserIds = offerings.map((o) => o.tutorUserId);
-    if (!tutorUserIds.length) return { items: [], total: 0, page, limit };
-    profileQuery.userId = { $in: tutorUserIds };
+    if (!restrictTo(offerings.map((o) => o.tutorUserId))) return empty;
   }
 
-  const nameQuery = String(filters.search || filters.q || '').trim();
   if (filters.favoriteIds) {
-    const favIds = filters.favoriteIds.map((id) => id);
-    profileQuery.userId = profileQuery.userId?.$in
-      ? { $in: profileQuery.userId.$in.filter((id) => favIds.some((f) => String(f) === String(id))) }
-      : { $in: favIds };
-    if (!profileQuery.userId.$in.length) return { items: [], total: 0, page, limit };
+    if (!restrictTo(filters.favoriteIds)) return empty;
   }
 
+  const excluded = (filters.excludeIds || []).map(String);
+  const userMatch = { role: 'tutor', status: 'active' };
+  const idCond = {};
+  if (allowedIds) idCond.$in = allowedIds;
+  if (excluded.length) idCond.$nin = excluded;
+  if (Object.keys(idCond).length) userMatch._id = idCond;
+  const nameQuery = String(filters.search || filters.q || '').trim();
   if (nameQuery) {
-    const escaped = nameQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const userMatch = {
-      role: 'tutor',
-      status: 'active',
-      ...(profileQuery.userId ? { _id: profileQuery.userId } : {}),
-    };
-    if (filters.hideTutorName) {
-      userMatch.refCode = new RegExp(escaped, 'i');
-    } else {
-      userMatch.$or = [{ name: new RegExp(escaped, 'i') }, { refCode: new RegExp(escaped, 'i') }];
-    }
-    const named = await User.find(userMatch).select('_id');
-    if (!named.length) return { items: [], total: 0, page, limit };
-    profileQuery.userId = { $in: named.map((u) => u._id) };
+    const nameRe = new RegExp(escapeRegex(nameQuery), 'i');
+    if (filters.hideTutorName) userMatch.refCode = nameRe;
+    else userMatch.$or = [{ name: nameRe }, { refCode: nameRe }];
   }
-
-  if (filters.country) {
-    const users = await User.find({
-      role: 'tutor',
-      country: new RegExp(filters.country, 'i'),
-      status: 'active',
-      ...(tutorUserIds ? { _id: { $in: tutorUserIds } } : {}),
-    }).select('_id');
-    profileQuery.userId = { $in: users.map((u) => u._id) };
-  }
+  if (filters.country) userMatch.country = new RegExp(escapeRegex(filters.country), 'i');
+  const activeTutors = await User.find(userMatch).select('_id');
+  allowedIds = activeTutors.map((u) => String(u._id));
+  if (!allowedIds.length) return empty;
 
   const availableFrom = filters.availableFrom ? new Date(filters.availableFrom) : null;
   const availableTo = filters.availableTo ? new Date(filters.availableTo) : null;
@@ -121,22 +149,18 @@ async function searchTutors(filters, options = {}) {
               ? [17, 22]
               : null;
       if (hours) {
+        const hour = { $hour: { date: '$startAt', timezone: validTimezone(filters.timezone) } };
         slotQuery.$expr = {
-          $and: [
-            { $gte: [{ $hour: '$startAt' }, hours[0]] },
-            { $lt: [{ $hour: '$startAt' }, hours[1]] },
-          ],
+          $and: [{ $gte: [hour, hours[0]] }, { $lt: [hour, hours[1]] }],
         };
       }
     }
-    if (profileQuery.userId?.$in) {
-      slotQuery.tutorUserId = { $in: profileQuery.userId.$in };
-    }
+    slotQuery.tutorUserId = { $in: allowedIds };
     const freeSlots = await AvailabilitySlot.find(slotQuery).select('tutorUserId');
-    const availableIds = [...new Set(freeSlots.map((s) => s.tutorUserId.toString()))];
-    if (!availableIds.length) return { items: [], total: 0, page, limit };
-    profileQuery.userId = { $in: availableIds };
+    if (!restrictTo(freeSlots.map((s) => s.tutorUserId))) return empty;
   }
+
+  profileQuery.userId = { $in: allowedIds };
 
   await TutorProfile.updateMany(
     { isPremium: true, premiumUntil: { $lte: new Date() } },
@@ -152,16 +176,18 @@ async function searchTutors(filters, options = {}) {
     TutorProfile.countDocuments(profileQuery),
   ]);
 
-  const ids = profiles.map((p) => p.userId?._id || p.userId);
+  const ids = profiles.map((p) => p.userId?._id || p.userId).filter(Boolean);
   const subjects = await TutorSubject.find({ tutorUserId: { $in: ids } }).populate('subjectId');
 
-  const items = profiles.map((p) => {
-    const uid = (p.userId?._id || p.userId).toString();
-    return {
-      profile: p,
-      subjects: subjects.filter((s) => s.tutorUserId.toString() === uid),
-    };
-  });
+  const items = profiles
+    .filter((p) => p.userId)
+    .map((p) => {
+      const uid = String(p.userId._id || p.userId);
+      return {
+        profile: p,
+        subjects: subjects.filter((s) => s.tutorUserId.toString() === uid),
+      };
+    });
 
   return { items, total, page, limit };
 }
@@ -185,7 +211,14 @@ async function getTutorDetail(tutorUserId) {
     TutorVerification.findOne({ tutorUserId }),
     TutorVideo.find({ tutorUserId, isActive: true }).sort({ createdAt: -1 }),
   ]);
-  return { profile, subjects, availability: slots, reviews, verification, videos };
+  return {
+    profile,
+    subjects,
+    availability: await withoutBookedOverlaps(tutorUserId, slots),
+    reviews,
+    verification,
+    videos,
+  };
 }
 
 async function upsertOffering(tutorUserId, data) {
@@ -236,6 +269,11 @@ async function deleteAvailability(id, tutorUserId) {
 
 async function markSlotBooked(id, isBooked = true) {
   return AvailabilitySlot.findByIdAndUpdate(id, { isBooked }, { new: true });
+}
+
+// Atomically take a free slot; returns null if someone else already booked it.
+async function claimSlot(id) {
+  return AvailabilitySlot.findOneAndUpdate({ _id: id, isBooked: false }, { isBooked: true }, { new: true });
 }
 
 async function findSlotById(id) {
@@ -339,6 +377,7 @@ async function deleteVideo(id, tutorUserId) {
 }
 
 module.exports = {
+  withoutBookedOverlaps,
   searchTutors,
   getTutorDetail,
   upsertOffering,
@@ -350,6 +389,7 @@ module.exports = {
   findSlotOverlap,
   deleteAvailability,
   markSlotBooked,
+  claimSlot,
   findSlotById,
   findVerificationByTutor,
   getOrCreateVerification,

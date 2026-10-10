@@ -1,5 +1,7 @@
 const resourceRepo = require('./resource.repo');
 const paymentRepo = require('../payment/payment.repo');
+const parentRepo = require('../parent/parent.repo');
+const { escapeRegex } = require('../../utils/regex');
 const ApiError = require('../../common/ApiError');
 const { storedFileUrl } = require('../../utils/mediaUrl');
 const { RESOURCE_ACCESS, PAYMENT_STATUS, ROLES } = require('../../common/constants');
@@ -29,25 +31,44 @@ function shape(resource, user, purchasedIds) {
 
 async function purchasedSet(user) {
   if (!user || user.role === ROLES.ADMIN) return new Set();
-  const rows = await resourceRepo.listPurchases(user.id);
+  const owners = [user.id];
+  if (user.role === ROLES.STUDENT) {
+    const links = await parentRepo.listParentsOfStudents([user.id]);
+    for (const l of links) {
+      const parentId = l.parentUserId?._id || l.parentUserId;
+      if (parentId) owners.push(parentId);
+    }
+  }
+  const rows = await resourceRepo.listPurchases(owners);
   return new Set(rows.map((r) => r.resourceId.toString()));
+}
+
+function assertPaidPrice(accessType, price) {
+  if (accessType === RESOURCE_ACCESS.PAID && !(Number(price) > 0)) {
+    throw new ApiError(400, 'Paid resources need a price above 0');
+  }
 }
 
 async function list(query, user) {
   const filter = {};
-  if (query.includeInactive !== 'true') filter.isActive = true;
+  const canSeeInactive =
+    user?.role === ROLES.ADMIN || (query.createdBy && String(query.createdBy) === user?.id);
+  if (query.includeInactive !== 'true' || !canSeeInactive) filter.isActive = true;
+  if (user?.role === ROLES.ADMIN && ['true', 'false'].includes(String(query.isActive))) {
+    filter.isActive = String(query.isActive) === 'true';
+  }
   if (query.subjectId) filter.subjectId = query.subjectId;
   if (query.level) filter.level = query.level;
   if (query.type) filter.type = query.type;
-  if (query.topic) filter.topic = new RegExp(query.topic, 'i');
-  if (query.chapter) filter.chapter = new RegExp(query.chapter, 'i');
+  if (query.topic) filter.topic = new RegExp(escapeRegex(query.topic), 'i');
+  if (query.chapter) filter.chapter = new RegExp(escapeRegex(query.chapter), 'i');
   if (query.academicYear) filter.academicYear = query.academicYear;
   if (query.createdBy) filter.createdBy = query.createdBy;
   if (query.accessType) filter.accessType = query.accessType;
 
   const page = await resourceRepo.list(filter, {
-    page: Number(query.page) || 1,
-    limit: Number(query.limit) || 20,
+    page: Math.max(1, Number.parseInt(query.page, 10) || 1),
+    limit: Math.min(100, Math.max(1, Number.parseInt(query.limit, 10) || 20)),
     search: query.search,
   });
   const bought = await purchasedSet(user);
@@ -82,6 +103,7 @@ async function getById(id, user) {
 
 async function create(userId, body, file) {
   const fileUrl = storedFileUrl(file) || body.fileUrl || '';
+  assertPaidPrice(body.accessType, body.price);
   return resourceRepo.create({
     ...body,
     fileUrl,
@@ -100,11 +122,17 @@ async function update(id, body, user, file) {
     throw new ApiError(403, 'Not allowed');
   }
   const patch = { ...body };
+  delete patch._id;
+  delete patch.createdBy;
   if (file) patch.fileUrl = storedFileUrl(file);
-  if (patch.downloadableUntil === '') patch.downloadableUntil = undefined;
+  if (patch.downloadableUntil === '') patch.downloadableUntil = null;
   if (patch.isDownloadable === 'false') patch.isDownloadable = false;
   if (patch.isDownloadable === 'true') patch.isDownloadable = true;
   if (patch.accessType === RESOURCE_ACCESS.FREE) patch.price = 0;
+  assertPaidPrice(
+    patch.accessType ?? existing.accessType,
+    patch.price !== undefined ? patch.price : existing.price
+  );
   return resourceRepo.updateById(id, patch);
 }
 
@@ -117,8 +145,10 @@ async function remove(id, user) {
   return resourceRepo.deleteById(id);
 }
 
-async function bookmark(userId, resourceId) {
-  return resourceRepo.bookmark(userId, resourceId);
+async function bookmark(user, resourceId) {
+  const resource = await resourceRepo.findById(resourceId);
+  if (!resource || resource.isActive === false) throw new ApiError(404, 'Resource not found');
+  return resourceRepo.bookmark(user.id, resourceId);
 }
 
 async function unbookmark(userId, resourceId) {
@@ -127,8 +157,16 @@ async function unbookmark(userId, resourceId) {
   return item;
 }
 
-async function myBookmarks(userId) {
-  return resourceRepo.listBookmarks(userId);
+async function myBookmarks(user) {
+  const [rows, bought] = await Promise.all([
+    resourceRepo.listBookmarks(user.id),
+    purchasedSet(user),
+  ]);
+  return rows.map((b) => {
+    const row = b.toObject();
+    row.resourceId = b.resourceId ? shape(b.resourceId, user, bought) : null;
+    return row;
+  });
 }
 
 async function purchase(user, resourceId) {
@@ -137,8 +175,15 @@ async function purchase(user, resourceId) {
   if (resource.accessType !== RESOURCE_ACCESS.PAID) {
     throw new ApiError(400, 'This resource is free');
   }
-  const existing = await resourceRepo.findPurchase(user.id, resourceId);
-  if (existing) throw new ApiError(400, 'Already purchased');
+  const bought = await purchasedSet(user);
+  if (bought.has(resource._id.toString())) throw new ApiError(400, 'Already purchased');
+  const { Payment } = require('../payment/payment.model');
+  const open = await Payment.findOne({
+    payerUserId: user.id,
+    resourceId,
+    status: { $in: [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.FAILED, PAYMENT_STATUS.AWAITING_CONFIRMATION] },
+  });
+  if (open) return { payment: open, existing: true };
   const payment = await paymentRepo.createPayment({
     payerUserId: user.id,
     beneficiaryUserId: resource.createdBy,

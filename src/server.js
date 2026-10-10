@@ -6,8 +6,8 @@ const { s3Enabled } = require('./utils/s3');
 
 async function start() {
   await connectDb();
-  app.listen(env.port, () => {
-    console.log(`IBDP API listening on port ${env.port}`);
+  app.listen(env.port, '0.0.0.0', () => {
+    console.log(`IBDP API listening on 0.0.0.0:${env.port}`);
     console.log(`Demo OTP: ${env.demoOtp}`);
     console.log(
       s3Enabled()

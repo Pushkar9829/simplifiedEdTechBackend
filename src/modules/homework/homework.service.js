@@ -11,6 +11,11 @@ const { ASSIGNMENT_STATUS, ROLES } = require('../../common/constants');
 const { storedFileUrl } = require('../../utils/mediaUrl');
 const { normalizeGrade } = require('../../utils/grading');
 
+function refId(doc, path) {
+  const value = doc[path];
+  return value?._id || doc.populated?.(path) || value || null;
+}
+
 function fileToAttachment(file) {
   return {
     url: storedFileUrl(file),
@@ -24,7 +29,7 @@ async function create(tutorUserId, body, files = []) {
   const data = { ...body };
   if (data.bookingId) {
     const booking = await Booking.findById(data.bookingId);
-    if (!booking || booking.tutorUserId.toString() !== tutorUserId) {
+    if (!booking || booking.tutorUserId.toString() !== String(tutorUserId)) {
       throw new ApiError(400, 'Booking not found for this tutor');
     }
     if (booking.studentUserId.toString() !== String(data.studentUserId)) {
@@ -33,6 +38,9 @@ async function create(tutorUserId, body, files = []) {
     if (!data.subjectId) data.subjectId = booking.subjectId;
   } else {
     delete data.bookingId;
+    if (!(await progressService.hasTeachingRelationship(tutorUserId, data.studentUserId))) {
+      throw new ApiError(403, 'No teaching relationship with this student');
+    }
   }
   if (data.gradingScheme === 'marks' && !data.maxScore) {
     throw new ApiError(400, 'Max score is required for marks grading');
@@ -77,8 +85,8 @@ async function list(user, query) {
   if (query.status) filter.status = query.status;
   if (query.bookingId) filter.bookingId = query.bookingId;
   const page = await homeworkRepo.listAssignments(filter, {
-    page: Number(query.page) || 1,
-    limit: Number(query.limit) || 20,
+    page: Math.max(1, Number.parseInt(query.page, 10) || 1),
+    limit: Math.min(100, Math.max(1, Number.parseInt(query.limit, 10) || 20)),
   });
   return { ...page, items: page.items.map((item) => sanitizeAssignment(item, user.role)) };
 }
@@ -125,7 +133,7 @@ async function getById(user, id) {
 async function submit(studentUserId, assignmentId, notes, files) {
   const assignment = await homeworkRepo.findAssignmentById(assignmentId);
   if (!assignment) throw new ApiError(404, 'Assignment not found');
-  if (assignment.studentUserId._id.toString() !== studentUserId) {
+  if (String(refId(assignment, 'studentUserId')) !== studentUserId) {
     throw new ApiError(403, 'Not allowed');
   }
   if (assignment.status === ASSIGNMENT_STATUS.GRADED) {
@@ -133,6 +141,9 @@ async function submit(studentUserId, assignmentId, notes, files) {
   }
 
   const attachments = (files || []).map(fileToAttachment).filter((f) => f.url);
+  if (!attachments.length && !String(notes || '').trim()) {
+    throw new ApiError(400, 'Add a file or some notes before submitting');
+  }
   const submission = await homeworkRepo.upsertSubmission(assignmentId, studentUserId, {
     files: attachments,
     notes: notes || '',
@@ -140,7 +151,7 @@ async function submit(studentUserId, assignmentId, notes, files) {
   await homeworkRepo.updateAssignment(assignmentId, { status: ASSIGNMENT_STATUS.SUBMITTED });
   await progressService.touchStudyStreak(studentUserId);
   await notificationService.notify(
-    assignment.tutorUserId._id,
+    refId(assignment, 'tutorUserId'),
     'Homework submitted',
     `${assignment.title} was submitted`,
     'homework',
@@ -159,9 +170,11 @@ async function submit(studentUserId, assignmentId, notes, files) {
 async function grade(tutorUserId, assignmentId, body) {
   const assignment = await homeworkRepo.findAssignmentById(assignmentId);
   if (!assignment) throw new ApiError(404, 'Assignment not found');
-  if (assignment.tutorUserId._id.toString() !== tutorUserId) {
+  if (String(refId(assignment, 'tutorUserId')) !== tutorUserId) {
     throw new ApiError(403, 'Not allowed');
   }
+  const studentUserId = refId(assignment, 'studentUserId');
+  const subjectId = refId(assignment, 'subjectId');
 
   const structured = normalizeGrade(
     typeof body.grade === 'object' ? body.grade : { value: body.grade },
@@ -171,30 +184,32 @@ async function grade(tutorUserId, assignmentId, body) {
 
   const submission = await homeworkRepo.gradeSubmission(
     assignmentId,
-    assignment.studentUserId._id,
+    studentUserId,
     structured,
     body.feedback || ''
   );
-  if (!submission) throw new ApiError(404, 'Submission not found');
 
   await homeworkRepo.updateAssignment(assignmentId, { status: ASSIGNMENT_STATUS.GRADED });
-  await progressService.recordGrade({
-    studentUserId: assignment.studentUserId._id,
-    subjectId: assignment.subjectId._id || assignment.subjectId,
-    topic: assignment.title,
-    scoreLabel: structured.label,
-    scoreValue: structured.ibEquivalent,
-    source: 'homework',
-  });
+  if (subjectId) {
+    await progressService.recordGrade({
+      studentUserId,
+      subjectId,
+      topic: assignment.title,
+      scoreLabel: structured.label,
+      scoreValue: structured.ibEquivalent,
+      source: 'homework',
+      assignmentId,
+    });
+  }
   await notificationService.notify(
-    assignment.studentUserId._id,
+    studentUserId,
     'Homework graded',
     `${assignment.title}: ${structured.label}`,
     'grade',
     { assignmentId }
   );
   await notifyParentsOfStudent(
-    assignment.studentUserId._id,
+    studentUserId,
     'Grade update',
     `${assignment.title}: ${structured.label}`,
     'grade',

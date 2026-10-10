@@ -28,7 +28,7 @@ const createBadge = asyncHandler(async (req, res) => {
 });
 
 const awardBadge = asyncHandler(async (req, res) => {
-  const data = await progressService.awardBadge(req.body.studentUserId, req.body.badgeId);
+  const data = await progressService.awardBadge(req.user, req.body.studentUserId, req.body.badgeId);
   return success(res, data, 'Badge awarded');
 });
 

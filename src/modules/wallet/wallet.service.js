@@ -118,10 +118,8 @@ async function credit(wallet, amount, description, refType, refId, extra = {}) {
 }
 
 async function debit(wallet, amount, description, refType, refId) {
-  if (wallet.balance < money(amount) - 0.001) {
-    throw new ApiError(400, 'Insufficient wallet balance');
-  }
-  const next = await walletRepo.adjustBalance(wallet._id, -money(amount));
+  const next = await walletRepo.debitIfEnough(wallet._id, money(amount));
+  if (!next) throw new ApiError(400, 'Insufficient wallet balance');
   await walletRepo.addTx({
     walletId: wallet._id,
     type: WALLET_TX_TYPE.DEBIT,
@@ -133,10 +131,15 @@ async function debit(wallet, amount, description, refType, refId) {
   return next;
 }
 
+// Tutor share is rounded; the platform takes the remainder so the split always sums to the amount.
+function splitAmount(amount) {
+  const total = money(amount);
+  const tutorAmt = money(total * TUTOR_PAYOUT_RATE);
+  return { tutorAmt, platformAmt: money(total - tutorAmt) };
+}
+
 async function settlePaidBooking({ payment, tutorUserId }) {
-  const amount = money(payment.amount);
-  const platformAmt = money(amount * PLATFORM_COMMISSION_RATE);
-  const tutorAmt = money(amount * TUTOR_PAYOUT_RATE);
+  const { tutorAmt, platformAmt } = splitAmount(payment.amount);
   const tutorWallet = await walletRepo.upsertUserWallet(tutorUserId, payment.currency);
   const platformWallet = await walletRepo.upsertPlatformWallet(payment.currency);
   const ref = payment._id.toString();
@@ -146,8 +149,55 @@ async function settlePaidBooking({ payment, tutorUserId }) {
   return { tutorAmt, platformAmt };
 }
 
+// Revenue with no tutor beneficiary (plans, platform resources) goes entirely to the platform.
+async function settlePlatformOnly(payment) {
+  const platformWallet = await walletRepo.upsertPlatformWallet(payment.currency);
+  await credit(platformWallet, money(payment.amount), 'Platform revenue', 'payment', payment._id.toString());
+  return { tutorAmt: 0, platformAmt: money(payment.amount) };
+}
+
+// Undo a settlement on refund. Tutor/platform may go negative: that is money owed back.
+async function reverseSettlement(payment, settlement) {
+  const ref = payment._id.toString();
+  if (settlement.tutorUserId && settlement.tutorAmt) {
+    const tutorWallet = await walletRepo.upsertUserWallet(settlement.tutorUserId, payment.currency);
+    await walletRepo.adjustBalance(tutorWallet._id, -money(settlement.tutorAmt));
+    await walletRepo.addTx({
+      walletId: tutorWallet._id,
+      type: WALLET_TX_TYPE.DEBIT,
+      amount: money(settlement.tutorAmt),
+      description: `Refund — ${payment.description || 'payment'}`,
+      refType: 'refund',
+      refId: ref,
+    });
+  }
+  if (settlement.platformAmt) {
+    const platformWallet = await walletRepo.upsertPlatformWallet(payment.currency);
+    await walletRepo.adjustBalance(platformWallet._id, -money(settlement.platformAmt));
+    await walletRepo.addTx({
+      walletId: platformWallet._id,
+      type: WALLET_TX_TYPE.DEBIT,
+      amount: money(settlement.platformAmt),
+      description: `Refund — ${payment.description || 'payment'}`,
+      refType: 'refund',
+      refId: ref,
+    });
+  }
+}
+
+async function refundToPayer(payerUserId, payment) {
+  const wallet = await walletRepo.upsertUserWallet(payerUserId, payment.currency);
+  return credit(wallet, money(payment.amount), `Refund — ${payment.description || 'payment'}`, 'refund', payment._id.toString(), {
+    cycle: currentCycle(),
+    availableAt: new Date(),
+  });
+}
+
 async function debitPayer(userId, amount, currency, description, refId) {
   const wallet = await walletRepo.upsertUserWallet(userId, currency);
+  if (currency && wallet.currency && wallet.currency !== currency) {
+    throw new ApiError(400, `Your wallet is in ${wallet.currency}; this invoice is in ${currency}. Use manual Pay.`);
+  }
   return debit(wallet, amount, description, 'payment', refId);
 }
 
@@ -237,30 +287,48 @@ async function reviewWithdrawal(id, status, adminNote = '') {
   if (![WITHDRAWAL_STATUS.APPROVED, WITHDRAWAL_STATUS.REJECTED].includes(status)) {
     throw new ApiError(400, 'Invalid withdrawal status');
   }
-  const existing = await walletRepo.findWithdrawalById(id);
-  if (!existing) throw new ApiError(404, 'Withdrawal not found');
-  if (existing.status !== WITHDRAWAL_STATUS.PENDING) {
-    throw new ApiError(400, 'Withdrawal already reviewed');
-  }
+  const found = await walletRepo.findWithdrawalById(id);
+  if (!found) throw new ApiError(404, 'Withdrawal not found');
+  // Claim atomically so two concurrent reviews cannot both debit.
+  const existing = await walletRepo.claimWithdrawal(id, WITHDRAWAL_STATUS.PENDING, status);
+  if (!existing) throw new ApiError(400, 'Withdrawal already reviewed');
   const patch = { status, adminNote };
   if (status === WITHDRAWAL_STATUS.APPROVED) {
-    const tutorId = existing.tutorUserId._id || existing.tutorUserId;
+    const tutorId = existing.tutorUserId?._id || existing.tutorUserId;
     const wallet = await walletRepo.upsertUserWallet(tutorId);
-    await debit(wallet, existing.amount, 'Withdrawal', 'withdrawal', id);
+    try {
+      await debit(wallet, existing.amount, 'Withdrawal', 'withdrawal', id);
+    } catch (err) {
+      await walletRepo.updateWithdrawal(id, { status: WITHDRAWAL_STATUS.PENDING });
+      throw err;
+    }
     const bank = existing.bankAccountId
-      ? await walletRepo.findBankAccountById(existing.bankAccountId)
+      ? await walletRepo.findBankAccountById(existing.bankAccountId._id || existing.bankAccountId)
       : await walletRepo.findBankAccount(tutorId);
     if (bank) {
-      const sent = await payouts.sendPayout({
-        amount: existing.amount,
-        currency: existing.currency,
-        holderName: bank.holderName,
-        accountNumber: decryptAccount(bank.accountNumberEnc),
-        ifsc: bank.ifsc,
-        fundAccountId: bank.fundAccountId,
-        reference: id,
-      });
-      patch.payoutRef = sent.payoutRef;
+      try {
+        const sent = await payouts.sendPayout({
+          amount: existing.amount,
+          currency: existing.currency,
+          holderName: bank.holderName,
+          accountNumber: decryptAccount(bank.accountNumberEnc),
+          ifsc: bank.ifsc,
+          fundAccountId: bank.fundAccountId,
+          reference: id,
+        });
+        patch.payoutRef = sent.payoutRef;
+      } catch (err) {
+        // Payout failed: put the money back and leave the request pending for a retry.
+        await credit(wallet, existing.amount, 'Withdrawal reversed (payout failed)', 'withdrawal', id, {
+          cycle: currentCycle(),
+          availableAt: new Date(),
+        });
+        await walletRepo.updateWithdrawal(id, {
+          status: WITHDRAWAL_STATUS.PENDING,
+          adminNote: `Payout failed: ${err.message}`,
+        });
+        throw new ApiError(502, `Payout failed: ${err.message}`);
+      }
     }
   }
   return walletRepo.updateWithdrawal(id, patch);
@@ -279,6 +347,10 @@ module.exports = {
   getMyWallet,
   getPlatformWallet,
   settlePaidBooking,
+  settlePlatformOnly,
+  reverseSettlement,
+  refundToPayer,
+  splitAmount,
   debitPayer,
   requestWithdraw,
   myWithdrawals,

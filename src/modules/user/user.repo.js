@@ -1,6 +1,6 @@
 const User = require('./user.model');
 const { StudentProfile, TutorProfile, ParentProfile } = require('./profile.model');
-const { makeRefCode } = require('../../utils/refCode');
+const { makeRefCode, isDuplicateRefCode } = require('../../utils/refCode');
 
 async function findById(id) {
   return User.findById(id);
@@ -18,8 +18,15 @@ async function findByEmail(email) {
 async function create(data) {
   const user = await User.create(data);
   if (!user.refCode) {
-    user.refCode = makeRefCode(user._id);
-    await user.save();
+    for (let attempt = 0; ; attempt += 1) {
+      user.refCode = makeRefCode(user._id, attempt);
+      try {
+        await user.save();
+        break;
+      } catch (err) {
+        if (!isDuplicateRefCode(err) || attempt >= 5) throw err;
+      }
+    }
   }
   return user;
 }
@@ -83,6 +90,10 @@ async function updateTutorProfile(userId, data) {
   return TutorProfile.findOneAndUpdate({ userId }, data, { new: true, upsert: true });
 }
 
+async function updateParentProfile(userId, data) {
+  return ParentProfile.findOneAndUpdate({ userId }, data, { new: true, upsert: true });
+}
+
 module.exports = {
   findById,
   findByPhone,
@@ -96,4 +107,5 @@ module.exports = {
   getParentProfile,
   updateStudentProfile,
   updateTutorProfile,
+  updateParentProfile,
 };

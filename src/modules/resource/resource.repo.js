@@ -11,7 +11,7 @@ async function create(data) {
 }
 
 async function updateById(id, data) {
-  return Resource.findByIdAndUpdate(id, data, { new: true });
+  return Resource.findByIdAndUpdate(id, data, { new: true, runValidators: true });
 }
 
 async function findById(id) {
@@ -85,8 +85,9 @@ async function upsertPurchase(data) {
   );
 }
 
-async function listPurchases(userId) {
-  return ResourcePurchase.find({ userId }).select('resourceId');
+async function listPurchases(userIds) {
+  const ids = Array.isArray(userIds) ? userIds : [userIds];
+  return ResourcePurchase.find({ userId: { $in: ids } }).select('resourceId');
 }
 
 module.exports = {

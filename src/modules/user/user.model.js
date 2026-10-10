@@ -11,6 +11,11 @@ const userSchema = new mongoose.Schema(
     avatar: { type: String, default: '' },
     timezone: { type: String, default: 'UTC' },
     country: { type: String, default: '' },
+    countryId: { type: mongoose.Schema.Types.ObjectId, ref: 'Country' },
+    preferredCurrency: { type: String, default: '' },
+    dateOfBirth: { type: Date },
+    sex: { type: String, default: '' },
+    blacklistReason: { type: String, default: '' },
     refCode: { type: String, trim: true, unique: true, sparse: true },
     status: {
       type: String,
@@ -19,7 +24,7 @@ const userSchema = new mongoose.Schema(
     },
     lastLoginAt: { type: Date },
   },
-  { timestamps: true }
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
 
 module.exports = mongoose.model('User', userSchema);

@@ -18,8 +18,26 @@ const adminList = asyncHandler(async (req, res) => {
 });
 
 const adminSetStatus = asyncHandler(async (req, res) => {
-  const data = await userService.adminSetStatus(req.params.id, req.body.status);
+  await userService.assertAdminStatusChange(req.user.id, req.params.id, req.body.status);
+  const data = req.body.voidOpen
+    ? await userService.adminVoidUser(req.params.id, req.body.reason, req.body.status)
+    : await userService.adminSetStatus(req.params.id, req.body.status, req.body.reason);
   return success(res, data, 'User status updated');
 });
 
-module.exports = { getMe, updateMe, adminList, adminSetStatus };
+const block = asyncHandler(async (req, res) => {
+  const data = await userService.blockUser(req.user.id, req.body.targetUserId, req.body.reason);
+  return success(res, data, 'User blocked');
+});
+
+const unblock = asyncHandler(async (req, res) => {
+  const data = await userService.unblockUser(req.user.id, req.params.id);
+  return success(res, data, 'User unblocked');
+});
+
+const myBlocks = asyncHandler(async (req, res) => {
+  const data = await userService.listMyBlocks(req.user.id, req.user.role);
+  return success(res, data);
+});
+
+module.exports = { getMe, updateMe, adminList, adminSetStatus, block, unblock, myBlocks };

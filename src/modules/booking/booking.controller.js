@@ -30,7 +30,7 @@ const requestReschedule = asyncHandler(async (req, res) => {
 });
 
 const offerRescheduleSlots = asyncHandler(async (req, res) => {
-  const data = await scheduleChangeService.offerSlots(req.user, req.params.id, req.body.slotIds || []);
+  const data = await scheduleChangeService.offerSlots(req.user, req.params.id, req.body.slotIds || [], req.body.reason);
   return success(res, data, data.change?.status === 'awaiting_replacement' ? 'No slot offered' : 'Slots offered');
 });
 
@@ -118,6 +118,27 @@ const studentInsights = asyncHandler(async (req, res) => {
   return success(res, data);
 });
 
+const doorstepCheckIn = asyncHandler(async (req, res) => {
+  const data = await bookingService.doorstepCheckIn(req.user, req.params.id, {
+    ...req.body,
+    photoUrl: req.files?.photo?.[0] ? require('../../utils/mediaUrl').storedFileUrl(req.files.photo[0]) : req.body.photoUrl,
+    placePhotoUrl: req.files?.place?.[0]
+      ? require('../../utils/mediaUrl').storedFileUrl(req.files.place[0])
+      : req.body.placePhotoUrl,
+  });
+  return success(res, data, 'Doorstep check-in saved');
+});
+
+const confirmDoorstep = asyncHandler(async (req, res) => {
+  const data = await bookingService.confirmDoorstep(req.user, req.params.id);
+  return success(res, data, 'Arrival confirmed');
+});
+
+const addClassFile = asyncHandler(async (req, res) => {
+  const data = await bookingService.addClassFile(req.user, req.params.id, req.file);
+  return success(res, data, 'File added to class history');
+});
+
 module.exports = {
   create,
   list,
@@ -140,4 +161,7 @@ module.exports = {
   approveReplacement,
   declineReschedule,
   listScheduleChanges,
+  doorstepCheckIn,
+  confirmDoorstep,
+  addClassFile,
 };

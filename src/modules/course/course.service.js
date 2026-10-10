@@ -16,18 +16,52 @@ async function listMine(tutorUserId) {
   return courseRepo.list({ tutorUserId });
 }
 
-async function listPublished(query, role) {
+async function listPublished(query, user) {
+  const role = user?.role;
   const filter = { status: COURSE_STATUS.PUBLISHED };
   if (query.tutorUserId) filter.tutorUserId = query.tutorUserId;
   if (query.subjectId) filter.subjectId = query.subjectId;
+  if (query.level) filter.level = query.level;
+  if (query.countryId) filter.countryId = query.countryId;
+  if (query.paid === 'free') filter.price = 0;
+  if (query.paid === 'paid') filter.price = { $gt: 0 };
+  if (query.minPrice) filter.price = { ...(typeof filter.price === 'object' ? filter.price : {}), $gte: Number(query.minPrice) };
+  if (query.maxPrice) filter.price = { ...(typeof filter.price === 'object' ? filter.price : {}), $lte: Number(query.maxPrice) };
+  if (query.search) {
+    const escaped = String(query.search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    filter.$or = [{ title: new RegExp(escaped, 'i') }, { description: new RegExp(escaped, 'i') }];
+  }
+  const FavoriteItem = require('../favorite/favorite.model');
+  if (query.favorites === 'true' && user?.id) {
+    const favs = await FavoriteItem.find({ userId: user.id, kind: 'course' }).select('targetId');
+    filter._id = { $in: favs.map((f) => f.targetId) };
+    if (!favs.length) return [];
+  }
   const items = await courseRepo.list(filter);
-  return items.map((c) => hideCourseTutor(c, role));
+  const favIds = user?.id
+    ? new Set(
+        (await FavoriteItem.find({ userId: user.id, kind: 'course' }).select('targetId')).map((f) =>
+          String(f.targetId)
+        )
+      )
+    : new Set();
+  return items
+    .filter((c) => {
+      if (!query.category) return true;
+      return (c.subjectId?.category || 'ibdp') === query.category;
+    })
+    .map((c) => {
+      const row = hideCourseTutor(c, role);
+      const next = typeof row.toObject === 'function' ? row.toObject() : { ...row };
+      next.favorite = favIds.has(String(next._id));
+      return next;
+    });
 }
 
 async function getById(id, user) {
   const course = await courseRepo.findById(id);
   if (!course) throw new ApiError(404, 'Course not found');
-  const isOwner = user && user.id === course.tutorUserId._id.toString();
+  const isOwner = user && user.id === String(course.tutorUserId?._id || course.tutorUserId);
   if (course.status !== COURSE_STATUS.PUBLISHED && !isOwner && user?.role !== ROLES.ADMIN) {
     throw new ApiError(404, 'Course not found');
   }
@@ -38,16 +72,16 @@ async function getById(id, user) {
   return { course: hideCourseTutor(course, user?.role), enrollment };
 }
 
-async function create(tutorUserId, body, thumbnail) {
-  if (body.lessonPlanIds?.length) {
-    const count = await LessonPlan.countDocuments({
-      _id: { $in: body.lessonPlanIds },
-      tutorUserId,
-    });
-    if (count !== body.lessonPlanIds.length) {
-      throw new ApiError(400, 'One or more lesson plans do not belong to you');
-    }
+async function assertOwnLessonPlans(tutorUserId, lessonPlanIds) {
+  if (!lessonPlanIds?.length) return;
+  const count = await LessonPlan.countDocuments({ _id: { $in: lessonPlanIds }, tutorUserId });
+  if (count !== lessonPlanIds.length) {
+    throw new ApiError(400, 'One or more lesson plans do not belong to you');
   }
+}
+
+async function create(tutorUserId, body, thumbnail) {
+  await assertOwnLessonPlans(tutorUserId, body.lessonPlanIds);
   return courseRepo.create({
     ...body,
     countryId: body.countryId || undefined,
@@ -59,13 +93,15 @@ async function create(tutorUserId, body, thumbnail) {
 
 async function update(tutorUserId, id, body, thumbnail) {
   const existing = await courseRepo.findById(id);
-  if (!existing || existing.tutorUserId._id.toString() !== tutorUserId) {
+  if (!existing || String(existing.tutorUserId?._id || existing.tutorUserId) !== tutorUserId) {
     throw new ApiError(404, 'Course not found');
   }
   const patch = { ...body };
+  delete patch.tutorUserId;
   if (typeof patch.lessonPlanIds === 'string') patch.lessonPlanIds = [patch.lessonPlanIds];
+  await assertOwnLessonPlans(tutorUserId, patch.lessonPlanIds);
   if (thumbnail) patch.thumbnail = thumbnail;
-  if (patch.countryId === '') patch.countryId = undefined;
+  if (patch.countryId === '') patch.countryId = null;
   return courseRepo.updateById(id, patch);
 }
 
@@ -98,6 +134,13 @@ async function enroll(user, courseId, studentUserId) {
   if (existing && existing.status === 'active') {
     throw new ApiError(400, 'Already enrolled');
   }
+  // Reuse the open invoice instead of orphaning it with a second one.
+  if (existing?.paymentId) {
+    const open = await paymentRepo.findPaymentById(existing.paymentId);
+    if (open && ['pending', 'failed', 'awaiting_confirmation'].includes(open.status)) {
+      return { enrollment: existing, payment: open };
+    }
+  }
 
   const payment = await paymentRepo.createPayment({
     payerUserId: sid,
@@ -120,8 +163,17 @@ async function enroll(user, courseId, studentUserId) {
   return { enrollment, payment };
 }
 
-async function myEnrollments(studentUserId, role = 'student') {
-  const rows = await courseRepo.listEnrollments({ studentUserId });
+async function myEnrollments(user) {
+  const role = user?.role || 'student';
+  const filter = {};
+  if (role === ROLES.PARENT) {
+    const parentRepo = require('../parent/parent.repo');
+    const ids = await parentRepo.listLinkedStudentIds(user.id);
+    filter.studentUserId = { $in: ids };
+  } else {
+    filter.studentUserId = user.id || user;
+  }
+  const rows = await courseRepo.listEnrollments(filter);
   return rows.map((row) => {
     const next = typeof row.toObject === 'function' ? row.toObject() : { ...row };
     if (next.courseId) next.courseId = hideCourseTutor(next.courseId, role);

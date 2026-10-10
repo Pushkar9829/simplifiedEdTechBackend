@@ -58,6 +58,24 @@ router.post(
 router.put('/:id/report', ...tutorOnly, validate(reportSchema), controller.saveReport);
 router.get('/:id/join', authenticate, controller.join);
 router.post(
+  '/:id/doorstep',
+  authenticate,
+  authorize(ROLES.TUTOR),
+  upload.fields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'place', maxCount: 1 },
+  ]),
+  controller.doorstepCheckIn
+);
+router.post('/:id/doorstep/confirm', authenticate, authorize(ROLES.STUDENT, ROLES.PARENT), controller.confirmDoorstep);
+router.post(
+  '/:id/history',
+  authenticate,
+  authorize(ROLES.TUTOR),
+  upload.single('file'),
+  controller.addClassFile
+);
+router.post(
   '/:id/feedback',
   authenticate,
   authorize(ROLES.STUDENT, ROLES.PARENT),

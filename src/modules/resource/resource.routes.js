@@ -3,7 +3,7 @@ const controller = require('./resource.controller');
 const { authenticate, authorize } = require('../../middleware/auth');
 const { validate } = require('../../middleware/validate');
 const { upload } = require('../../middleware/upload');
-const { createResourceSchema } = require('./resource.validator');
+const { createResourceSchema, updateResourceSchema } = require('./resource.validator');
 const { ROLES } = require('../../common/constants');
 
 const router = express.Router();
@@ -25,6 +25,7 @@ router.patch(
   authenticate,
   authorize(ROLES.ADMIN, ROLES.TUTOR),
   upload.single('file'),
+  validate(updateResourceSchema),
   controller.update
 );
 router.delete('/:id', authenticate, authorize(ROLES.ADMIN, ROLES.TUTOR), controller.remove);

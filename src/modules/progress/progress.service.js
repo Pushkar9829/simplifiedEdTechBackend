@@ -1,10 +1,9 @@
 const progressRepo = require('./progress.repo');
 const parentRepo = require('../parent/parent.repo');
-const bookingRepo = require('../booking/booking.repo');
-const homeworkRepo = require('../homework/homework.repo');
+const Booking = require('../booking/booking.model');
 const userRepo = require('../user/user.repo');
 const ApiError = require('../../common/ApiError');
-const { ROLES } = require('../../common/constants');
+const { ROLES, BOOKING_STATUS } = require('../../common/constants');
 const { dayjs } = require('../../utils/time');
 
 function scoreToIbGrade(avg) {
@@ -67,16 +66,36 @@ async function refreshPredictedGrades(studentUserId) {
   return userRepo.updateStudentProfile(studentUserId, { predictedGrades: predicted });
 }
 
-async function recordGrade({ studentUserId, subjectId, topic, scoreLabel, scoreValue, source }) {
+async function hasTeachingRelationship(tutorUserId, studentUserId) {
+  const found = await Booking.exists({
+    tutorUserId,
+    studentUserId,
+    status: { $ne: BOOKING_STATUS.CANCELLED },
+  });
+  return Boolean(found);
+}
+
+async function recordGrade({
+  studentUserId,
+  subjectId,
+  topic,
+  scoreLabel,
+  scoreValue,
+  source,
+  assignmentId,
+}) {
   const numeric = Number.isFinite(scoreValue) ? scoreValue : Number.parseFloat(scoreLabel);
-  const record = await progressRepo.createRecord({
+  const data = {
     studentUserId,
     subjectId,
     topic,
     metricType: source || 'homework',
     scoreLabel,
     scoreValue: Number.isFinite(numeric) ? numeric : 0,
-  });
+  };
+  const record = assignmentId
+    ? await progressRepo.upsertRecordByAssignment(assignmentId, data)
+    : await progressRepo.createRecord(data);
   await touchStudyStreak(studentUserId);
   await refreshPredictedGrades(studentUserId);
   return record;
@@ -137,11 +156,7 @@ async function assertCanViewStudentProgress(user, studentUserId) {
   }
 
   if (user.role === ROLES.TUTOR) {
-    const [booking, homework] = await Promise.all([
-      bookingRepo.list({ tutorUserId: user.id, studentUserId }, { page: 1, limit: 1 }),
-      homeworkRepo.listAssignments({ tutorUserId: user.id, studentUserId }, { page: 1, limit: 1 }),
-    ]);
-    if (booking.total > 0 || homework.total > 0) return;
+    if (await hasTeachingRelationship(user.id, studentUserId)) return;
     throw new ApiError(403, 'No teaching relationship with this student');
   }
 
@@ -159,7 +174,7 @@ async function addHours(studentUserId, body) {
     subjectId: body.subjectId,
     topic: body.topic || '',
     metricType: 'hours',
-    hours: body.hours || 0,
+    hours: body.hours,
   });
   await touchStudyStreak(studentUserId);
   return record;
@@ -173,7 +188,16 @@ async function listBadges() {
   return progressRepo.listBadges();
 }
 
-async function awardBadge(studentUserId, badgeId) {
+async function awardBadge(user, studentUserId, badgeId) {
+  const [badge, student] = await Promise.all([
+    progressRepo.findBadgeById(badgeId),
+    userRepo.findById(studentUserId),
+  ]);
+  if (!badge || badge.isActive === false) throw new ApiError(404, 'Badge not found');
+  if (!student || student.role !== ROLES.STUDENT) throw new ApiError(404, 'Student not found');
+  if (user.role === ROLES.TUTOR && !(await hasTeachingRelationship(user.id, studentUserId))) {
+    throw new ApiError(403, 'No teaching relationship with this student');
+  }
   return progressRepo.awardBadge(studentUserId, badgeId);
 }
 
@@ -187,4 +211,5 @@ module.exports = {
   awardBadge,
   touchStudyStreak,
   refreshPredictedGrades,
+  hasTeachingRelationship,
 };

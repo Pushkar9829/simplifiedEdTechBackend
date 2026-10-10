@@ -1,7 +1,7 @@
 const { Course, CourseEnrollment } = require('./course.model');
 
 const populate = [
-  { path: 'subjectId', select: 'name' },
+  { path: 'subjectId', select: 'name category' },
   { path: 'countryId', select: 'name code currency' },
   { path: 'lessonPlanIds', select: 'title status objectives' },
   { path: 'tutorUserId', select: 'name refCode' },

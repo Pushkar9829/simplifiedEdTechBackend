@@ -94,6 +94,8 @@ const lessonPlanSchema = Joi.object({
   status: Joi.string().valid('draft', 'ready', 'completed'),
 });
 
+const lessonPlanUpdateSchema = lessonPlanSchema.fork(['subjectId', 'title'], (s) => s.optional());
+
 module.exports = {
   offeringSchema,
   availabilitySchema,
@@ -103,5 +105,6 @@ module.exports = {
   studentReviewSchema,
   studentNoteSchema,
   lessonPlanSchema,
+  lessonPlanUpdateSchema,
   videoSchema,
 };

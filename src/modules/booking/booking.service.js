@@ -134,6 +134,17 @@ async function createBooking(actor, body) {
   if (!tutorProfile || tutorProfile.verificationStatus !== 'approved') {
     throw new ApiError(400, 'Tutor is not available for booking');
   }
+  const userService = require('../user/user.service');
+  const blocked =
+    (await userService.isBlocked(studentUserId, body.tutorUserId)) ||
+    (actor.id !== studentUserId && (await userService.isBlocked(actor.id, body.tutorUserId)));
+  if (blocked) {
+    throw new ApiError(403, 'This tutor or student is blocked');
+  }
+  const planType = body.planType || (body.isRecurring ? 'regular' : 'single');
+  if (planType === 'single' && tutorProfile.needBasedClasses === false) {
+    throw new ApiError(400, 'This tutor takes regular or subscription students only');
+  }
 
   let startAt;
   let endAt;
@@ -145,6 +156,9 @@ async function createBooking(actor, body) {
     if (!slot || slot.isBooked) throw new ApiError(400, 'Slot unavailable');
     if (slot.tutorUserId.toString() !== body.tutorUserId) {
       throw new ApiError(400, 'Slot does not belong to tutor');
+    }
+    if (slot.deliveryMode && body.deliveryMode && body.deliveryMode !== slot.deliveryMode) {
+      throw new ApiError(400, `This slot is for ${slot.deliveryMode} classes`);
     }
     startAt = slot.startAt;
     endAt = slot.endAt;
@@ -189,8 +203,8 @@ async function createBooking(actor, body) {
 
   const bookings = [];
   for (let i = 0; i < count; i += 1) {
-    const s = dayjs(startAt).add(i, 'week').toDate();
-    const e = dayjs(endAt).add(i, 'week').toDate();
+    const s = dayjs(startAt).tz(timezone).add(i, 'week').toDate();
+    const e = dayjs(endAt).tz(timezone).add(i, 'week').toDate();
     const overlapI = await bookingRepo.findOverlap(body.tutorUserId, s, e);
     if (overlapI) continue;
     bookings.push({
@@ -215,30 +229,50 @@ async function createBooking(actor, body) {
       currency,
       bookedByUserId: actor.id,
       deliveryMode,
+      planType,
+      meetingProvider: body.meetingProvider || tutorProfile.meetingProvider || 'zoom',
+      studentAddress: deliveryMode === 'offline' ? body.studentAddress || null : null,
     });
   }
 
   if (!bookings.length) throw new ApiError(409, 'No available slots for booking');
 
-  const created = await bookingRepo.createMany(bookings);
-  if (slotId) await tutorRepo.markSlotBooked(slotId, true);
+  if (slotId && !(await tutorRepo.claimSlot(slotId))) {
+    throw new ApiError(409, 'Slot was just booked by someone else');
+  }
+  let created;
+  try {
+    created = await bookingRepo.createMany(bookings);
+  } catch (err) {
+    if (slotId) await tutorRepo.markSlotBooked(slotId, false);
+    throw err;
+  }
 
   const subject = await Subject.findById(body.subjectId).select('name');
   for (let i = 0; i < created.length; i += 1) {
     const b = created[i];
     const patch = {};
     if (i > 0) patch.parentBookingId = created[0]._id;
+    patch.refCode = `CLS-${String(b._id).slice(-6).toUpperCase()}`;
     if (b.deliveryMode === 'online') {
       const meeting = await provisionMeeting(b, subject?.name);
-      const tools = classToolsFor(b._id, subject?.name);
-      patch.zoom = meeting;
-      patch.meetingUrl = meeting.joinUrl || '';
+      const provider = b.meetingProvider || 'zoom';
+      const tools = classToolsFor(b._id, subject?.name, provider);
+      patch.zoom = { ...meeting, provider };
+      patch.meetingUrl = tools.meetUrl || tools.teamsUrl || meeting.joinUrl || '';
       patch.classTools = tools;
+      patch.classHistory = [
+        { kind: 'meeting', label: provider, url: patch.meetingUrl, at: new Date() },
+        { kind: 'whiteboard', label: 'Whiteboard', url: tools.whiteboardUrl, at: new Date() },
+      ];
       const text = classToolsMessage({
         subjectName: subject?.name,
         zoomJoin: meeting.joinUrl,
         docsUrl: tools.docsUrl,
         whiteboardUrl: tools.whiteboardUrl,
+        meetUrl: tools.meetUrl,
+        teamsUrl: tools.teamsUrl,
+        provider,
       });
       await messageService
         .sendOfficial(body.tutorUserId, studentUserId, text, 'class_links')
@@ -260,7 +294,7 @@ async function createBooking(actor, body) {
       currency: b.currency,
       method: 'manual',
       status: 'pending',
-      description: 'Lesson booking payment',
+      description: `Class: ${subject?.name || 'Lesson'} · ${dayjs(b.startAt).tz(b.timezone || 'UTC').format('D MMM YYYY, HH:mm')} (${b.timezone || 'UTC'})`,
     });
     payments.push(payment);
   }
@@ -297,9 +331,21 @@ async function listBookings(user, query) {
     const linked = await parentRepo.listLinkedStudentIds(user.id);
     filter.studentUserId = { $in: linked };
   }
-  if (query.status) filter.status = query.status;
+  // status accepts one value or a comma list; excludeStatus hides e.g. cancelled classes.
+  if (query.status) {
+    const list = String(query.status).split(',').map((s) => s.trim()).filter(Boolean);
+    filter.status = list.length > 1 ? { $in: list } : list[0];
+  }
+  if (query.excludeStatus && !query.status) {
+    filter.status = { $nin: String(query.excludeStatus).split(',').map((s) => s.trim()).filter(Boolean) };
+  }
   if (query.meetingStatus) filter.meetingStatus = query.meetingStatus;
   if (query.studentUserId && ['admin', 'tutor'].includes(user.role)) {
+    filter.studentUserId = query.studentUserId;
+  }
+  if (query.studentUserId && user.role === 'parent') {
+    const linked = (filter.studentUserId.$in || []).map(String);
+    if (!linked.includes(String(query.studentUserId))) throw new ApiError(403, 'Student not linked to this parent');
     filter.studentUserId = query.studentUserId;
   }
   if (query.tutorUserId && user.role === 'admin') filter.tutorUserId = query.tutorUserId;
@@ -309,11 +355,40 @@ async function listBookings(user, query) {
     if (query.to) filter.startAt.$lte = new Date(query.to);
   }
 
+  // Upcoming lists want soonest first; history wants newest first (`sort=-startAt`).
+  const sort = query.sort === '-startAt' ? { startAt: -1 } : { startAt: 1 };
   const page = await bookingRepo.list(filter, {
-    page: Number(query.page) || 1,
-    limit: Math.min(Number(query.limit) || 50, 500),
+    page: Math.max(1, Number(query.page) || 1),
+    limit: Math.min(Math.max(1, Number(query.limit) || 50), 500),
+    sort,
+    includeStudentPhone: user.role === ROLES.ADMIN,
   });
-  return shapeBookingPage(page, user);
+  const shaped = shapeBookingPage(page, user);
+  return attachPaymentStatus(shaped);
+}
+
+// Each booking card shows whether its invoice is paid, so the UI can offer Pay in place.
+async function attachPaymentStatus(page) {
+  if (!page?.items?.length) return page;
+  const { Payment } = require('../payment/payment.model');
+  const ids = page.items.map((b) => b._id);
+  const payments = await Payment.find({ bookingId: { $in: ids } })
+    .select('bookingId status amount currency')
+    .sort({ createdAt: -1 })
+    .lean();
+  const byBooking = new Map();
+  for (const p of payments) {
+    const key = String(p.bookingId);
+    if (!byBooking.has(key)) byBooking.set(key, p);
+  }
+  const items = page.items.map((b) => {
+    const p = byBooking.get(String(b._id));
+    return {
+      ...b,
+      payment: p ? { _id: p._id, status: p.status, amount: p.amount, currency: p.currency } : null,
+    };
+  });
+  return { ...page, items };
 }
 
 async function cancelBooking(user, id) {
@@ -379,17 +454,23 @@ async function rescheduleBooking(user, id, body) {
 
   const startAt = new Date(body.startAt);
   const endAt = new Date(body.endAt);
+  if (endAt <= startAt) throw new ApiError(400, 'endAt must be after startAt');
   assertLeadTime(startAt);
-  const overlap = await bookingRepo.findOverlap(booking.tutorUserId._id, startAt, endAt, id);
+  const overlap = await bookingRepo.findOverlap(idOf(booking.tutorUserId), startAt, endAt, id);
   if (overlap) throw new ApiError(409, 'Tutor has a conflicting booking');
 
   const timezone = body.timezone || booking.timezone;
+  // The class leaves its original slot, so free it and drop the stale doorstep check-in.
+  if (booking.slotId) await tutorRepo.markSlotBooked(booking.slotId, false);
   const updated = await bookingRepo.updateById(id, {
-    startAt,
-    endAt,
-    timezone,
-    status: BOOKING_STATUS.RESCHEDULED,
-    meetingStatus: MEETING_STATUS.SCHEDULED,
+    $set: {
+      startAt,
+      endAt,
+      timezone,
+      status: BOOKING_STATUS.RESCHEDULED,
+      meetingStatus: MEETING_STATUS.SCHEDULED,
+    },
+    $unset: { slotId: 1, doorstep: 1 },
   });
   if (booking.zoom?.meetingId) {
     await zoom
@@ -399,21 +480,21 @@ async function rescheduleBooking(user, id, body) {
 
   if (isTutor) {
     await notificationService.notify(
-      booking.studentUserId._id,
+      idOf(booking.studentUserId),
       'Booking rescheduled',
       'Your tutor rescheduled a lesson',
       'booking'
     );
   } else {
     await notificationService.notify(
-      booking.tutorUserId._id,
+      idOf(booking.tutorUserId),
       'Booking rescheduled',
       'A student rescheduled a lesson',
       'booking'
     );
   }
   await notifyParentsOfStudent(
-    booking.studentUserId._id,
+    idOf(booking.studentUserId),
     'Class rescheduled',
     'A lesson for your child was rescheduled.',
     'booking'
@@ -424,13 +505,19 @@ async function rescheduleBooking(user, id, body) {
 
 async function setAttendance(tutorUserId, id, attendance) {
   const booking = await loadTutorBooking(tutorUserId, id);
+  if (booking.status === BOOKING_STATUS.CANCELLED) {
+    throw new ApiError(400, 'Booking is cancelled');
+  }
+  if (attendance !== 'pending' && new Date(booking.startAt) > new Date()) {
+    throw new ApiError(400, 'Attendance can be marked once the class has started');
+  }
   const patch = { attendance };
   if (attendance === 'absent') patch.meetingStatus = MEETING_STATUS.NO_SHOW;
   else if (booking.meetingStatus === MEETING_STATUS.NO_SHOW) patch.meetingStatus = MEETING_STATUS.SCHEDULED;
   const updated = await bookingRepo.updateById(id, patch);
   if (attendance === 'absent') {
     await notifyParentsOfStudent(
-      booking.studentUserId._id,
+      idOf(booking.studentUserId),
       'Attendance alert',
       'Your child was marked absent for a class.',
       'attendance',
@@ -444,6 +531,13 @@ async function setMeetingStatus(tutorUserId, id, meetingStatus) {
   const booking = await loadTutorBooking(tutorUserId, id);
   if (booking.status === BOOKING_STATUS.CANCELLED) {
     throw new ApiError(400, 'Booking is cancelled');
+  }
+  const opensAt = new Date(booking.startAt).getTime() - JOIN_EARLY_MINUTES * 60000;
+  if (meetingStatus === MEETING_STATUS.NO_SHOW && new Date(booking.startAt) > new Date()) {
+    throw new ApiError(400, 'A no-show can be recorded once the class has started');
+  }
+  if (meetingStatus === MEETING_STATUS.LIVE && Date.now() < opensAt) {
+    throw new ApiError(400, `The class can go live ${JOIN_EARLY_MINUTES} minutes before start`);
   }
   const patch = { meetingStatus };
   if (meetingStatus === MEETING_STATUS.LIVE && !booking.startedAt) patch.startedAt = new Date();
@@ -492,23 +586,21 @@ async function completeBooking(tutorUserId, id, body = {}, files = []) {
   if (booking.status === BOOKING_STATUS.CANCELLED) {
     throw new ApiError(400, 'Cancelled bookings cannot be completed');
   }
+  if (booking.status === BOOKING_STATUS.COMPLETED) {
+    throw new ApiError(400, 'This class is already completed');
+  }
+  if (booking.deliveryMode === 'offline' && !booking.doorstep?.checkedInAt) {
+    throw new ApiError(400, 'Check in at the doorstep with a photo before completing this class');
+  }
   if (new Date(booking.startAt) > new Date()) {
     throw new ApiError(400, 'You can complete a session only after it has started');
   }
 
-  const patch = {
-    status: BOOKING_STATUS.COMPLETED,
-    meetingStatus: MEETING_STATUS.ENDED,
-    completedAt: new Date(),
-  };
-  if (booking.attendance === 'pending') patch.attendance = 'present';
-  const updated = await bookingRepo.updateById(id, patch);
-
-  let report = null;
-  if (body.report && Object.values(body.report).some((v) => (Array.isArray(v) ? v.length : v))) {
-    report = await upsertReport(booking, body.report);
+  if (body.assignment?.gradingScheme === 'marks' && !(Number(body.assignment.maxScore) > 0)) {
+    throw new ApiError(400, 'Set total marks for a marks-based assignment');
   }
 
+  // Homework first: if it fails, the class stays open and the tutor can retry the whole step.
   let assignment = null;
   if (body.assignment) {
     assignment = await homeworkService.create(
@@ -522,6 +614,20 @@ async function completeBooking(tutorUserId, id, body = {}, files = []) {
       },
       files
     );
+  }
+
+  const patch = {
+    status: BOOKING_STATUS.COMPLETED,
+    meetingStatus: MEETING_STATUS.ENDED,
+    completedAt: new Date(),
+  };
+  if (booking.attendance === 'pending') patch.attendance = 'present';
+  const updated = await bookingRepo.updateById(id, patch);
+  await require('./scheduleChange.service').closeOpenChanges(id);
+
+  let report = null;
+  if (body.report && Object.values(body.report).some((v) => (Array.isArray(v) ? v.length : v))) {
+    report = await upsertReport(booking, body.report);
   }
 
   await notificationService.notify(
@@ -567,8 +673,10 @@ async function joinBooking(user, id) {
     const profile = slot?.location ? null : await userRepo.getTutorProfile(tutorId);
     return {
       deliveryMode: 'offline',
-      location: slot?.location || profile?.location || {},
+      location: booking.studentAddress || slot?.location || profile?.location || {},
+      doorstep: booking.doorstep || {},
       meetingUrl: '',
+      classHistory: booking.classHistory || [],
     };
   }
 
@@ -584,13 +692,14 @@ async function joinBooking(user, id) {
     const subject = await Subject.findById(booking.subjectId).select('name');
     const generated = classToolsFor(booking._id, subject?.name);
     tools = {
+      ...tools,
       docsUrl: tools.docsUrl || generated.docsUrl,
       whiteboardUrl: tools.whiteboardUrl || generated.whiteboardUrl,
     };
     await bookingRepo.updateById(id, { classTools: tools });
   }
 
-  const joinUrl = booking.zoom?.joinUrl || booking.meetingUrl;
+  const joinUrl = booking.meetingUrl || booking.zoom?.joinUrl;
   return {
     deliveryMode: 'online',
     meetingUrl: isTutor ? booking.zoom?.startUrl || joinUrl : joinUrl,
@@ -600,7 +709,50 @@ async function joinBooking(user, id) {
     opensAt: new Date(opensAt),
     location: null,
     classTools: tools,
+    classHistory: booking.classHistory || [],
+    meetingProvider: booking.meetingProvider || booking.zoom?.provider || 'zoom',
   };
+}
+
+async function doorstepCheckIn(user, id, body = {}) {
+  const booking = await loadTutorBooking(user.id, id);
+  if (booking.deliveryMode !== 'offline') throw new ApiError(400, 'Doorstep check-in is for offline classes');
+  if (!body.photoUrl) throw new ApiError(400, 'Upload a live photo at the doorstep');
+  const doorstep = {
+    photoUrl: body.photoUrl,
+    placePhotoUrl: body.placePhotoUrl || '',
+    checkedInAt: new Date(),
+    lat: body.lat,
+    lng: body.lng,
+  };
+  const updated = await bookingRepo.updateById(id, { doorstep });
+  await notificationService.notify(
+    idOf(booking.studentUserId),
+    'Tutor at your address',
+    'Your tutor checked in at the class address. Confirm if this is correct.',
+    'booking',
+    { bookingId: id }
+  );
+  return updated;
+}
+
+async function confirmDoorstep(user, id) {
+  const booking = await loadViewableBooking(user, id);
+  if (!(await canManageStudentBooking(user, booking))) throw new ApiError(403, 'Not allowed');
+  if (!booking.doorstep?.checkedInAt) throw new ApiError(400, 'Tutor has not checked in yet');
+  return bookingRepo.updateById(id, { 'doorstep.confirmedAt': new Date() });
+}
+
+async function addClassFile(user, id, file) {
+  if (!file) throw new ApiError(400, 'Attach a file');
+  const booking = await loadTutorBooking(user.id, id);
+  const history = [...(booking.classHistory || []), {
+    kind: 'download',
+    label: file.originalname || 'Class file',
+    url: require('../../utils/mediaUrl').storedFileUrl(file),
+    at: new Date(),
+  }];
+  return bookingRepo.updateById(id, { classHistory: history });
 }
 
 async function sendFeedback(user, bookingId, body = {}) {
@@ -748,4 +900,7 @@ module.exports = {
   bookingSummary,
   bookingChain,
   studentInsights,
+  doorstepCheckIn,
+  confirmDoorstep,
+  addClassFile,
 };

@@ -13,7 +13,10 @@ const fileSchema = new mongoose.Schema(
 const projectSchema = new mongoose.Schema(
   {
     tutorUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    studentUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    studentUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+    subjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Subject' },
+    openToJoin: { type: Boolean, default: false, index: true },
+    sourceProjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project' },
     kind: { type: String, enum: ['project', 'assignment'], default: 'project' },
     name: { type: String, required: true },
     description: { type: String, default: '' },

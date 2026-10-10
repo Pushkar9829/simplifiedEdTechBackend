@@ -10,6 +10,8 @@ const subscriptionPlanSchema = new mongoose.Schema(
     billingCycle: { type: String, default: 'one_time' },
     features: [{ type: String }],
     audience: { type: String, default: 'student' },
+    planKind: { type: String, default: 'single' },
+    classCount: { type: Number, default: 1 },
     rankBoost: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
   },
@@ -35,7 +37,23 @@ const paymentSchema = new mongoose.Schema(
     },
     description: { type: String, default: '' },
     paidAt: { type: Date },
+    // Set once when wallets are credited; guards against double settlement.
+    settledAt: { type: Date },
+    settlement: {
+      tutorUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      tutorAmt: { type: Number, default: 0 },
+      platformAmt: { type: Number, default: 0 },
+    },
+    refundedAt: { type: Date },
     adminNote: { type: String, default: '' },
+    refundRequest: {
+      status: { type: String, default: '' },
+      reason: { type: String, default: '' },
+      note: { type: String, default: '' },
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      tutorNote: { type: String, default: '' },
+      requestedAt: { type: Date },
+    },
   },
   { timestamps: true }
 );

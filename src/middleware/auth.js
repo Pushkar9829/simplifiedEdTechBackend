@@ -11,7 +11,11 @@ async function authenticate(req, _res, next) {
 
     const payload = jwt.verify(token, env.jwtSecret);
     const user = await userRepo.findById(payload.userId);
-    if (!user || user.status !== 'active') {
+    if (!user) throw new ApiError(401, 'Invalid or inactive user');
+    if (user.status === 'blacklisted') {
+      throw new ApiError(403, 'This account is blocked from the platform');
+    }
+    if (user.status !== 'active') {
       throw new ApiError(401, 'Invalid or inactive user');
     }
 

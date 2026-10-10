@@ -13,6 +13,7 @@ const {
   studentReviewSchema,
   studentNoteSchema,
   lessonPlanSchema,
+  lessonPlanUpdateSchema,
   videoSchema,
 } = require('./tutor.validator');
 const {
@@ -76,7 +77,12 @@ router.delete('/me/notes/:noteId', ...tutorOnly, controller.removeStudentNote);
 router.get('/me/lesson-plans', ...tutorOnly, controller.listLessonPlans);
 router.get('/me/lesson-plans/:planId', ...tutorOnly, controller.getLessonPlan);
 router.post('/me/lesson-plans', ...tutorOnly, validate(lessonPlanSchema), controller.addLessonPlan);
-router.patch('/me/lesson-plans/:planId', ...tutorOnly, controller.updateLessonPlan);
+router.patch(
+  '/me/lesson-plans/:planId',
+  ...tutorOnly,
+  validate(lessonPlanUpdateSchema),
+  controller.updateLessonPlan
+);
 router.delete('/me/lesson-plans/:planId', ...tutorOnly, controller.removeLessonPlan);
 
 router.get('/me/videos', ...tutorOnly, controller.listVideos);

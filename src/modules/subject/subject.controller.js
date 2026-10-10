@@ -7,6 +7,11 @@ const list = asyncHandler(async (req, res) => {
   return success(res, data);
 });
 
+const getOne = asyncHandler(async (req, res) => {
+  const data = await subjectService.getSubject(req.params.id);
+  return success(res, data);
+});
+
 const create = asyncHandler(async (req, res) => {
   const data = await subjectService.createSubject(req.body);
   return created(res, data, 'Subject created');
@@ -27,4 +32,4 @@ const remove = asyncHandler(async (req, res) => {
   return success(res, data, 'Subject removed');
 });
 
-module.exports = { list, create, update, select, remove };
+module.exports = { list, getOne, create, update, select, remove };

@@ -56,8 +56,8 @@ async function findSubmission(assignmentId, studentUserId) {
 async function gradeSubmission(assignmentId, studentUserId, grade, feedback) {
   return Submission.findOneAndUpdate(
     { assignmentId, studentUserId },
-    { grade, feedback, gradedAt: new Date() },
-    { new: true }
+    { $set: { grade, feedback, gradedAt: new Date() } },
+    { new: true, upsert: true, runValidators: true }
   );
 }
 

@@ -1,37 +1,39 @@
 const bookingRepo = require('../booking/booking.repo');
+const Booking = require('../booking/booking.model');
 const homeworkRepo = require('../homework/homework.repo');
 const progressService = require('../progress/progress.service');
 const notificationRepo = require('../notification/notification.repo');
-const messageRepo = require('../message/message.repo');
+const messageService = require('../message/message.service');
 const userRepo = require('../user/user.repo');
-const { ASSIGNMENT_STATUS } = require('../../common/constants');
+const { ASSIGNMENT_STATUS, BOOKING_STATUS } = require('../../common/constants');
 const { sanitizeBookingItems } = require('../../utils/tutorPrivacy');
 
 async function getDashboard(studentUserId) {
   const now = new Date();
   const [
-    bookings,
+    upcoming,
+    recentBookings,
     homework,
     progress,
-    notifications,
+    unreadNotifications,
     conversations,
     profile,
   ] = await Promise.all([
-    bookingRepo.list({ studentUserId }, { page: 1, limit: 20 }),
+    bookingRepo.list(
+      { studentUserId, startAt: { $gte: now }, status: { $ne: BOOKING_STATUS.CANCELLED } },
+      { page: 1, limit: 20 }
+    ),
+    Booking.find({ studentUserId }).select('status createdAt updatedAt').sort({ updatedAt: -1 }).limit(5),
     homeworkRepo.listAssignments({ studentUserId }, { page: 1, limit: 20 }),
     progressService.myProgress(studentUserId),
-    notificationRepo.listByUser(studentUserId, { page: 1, limit: 10 }),
-    messageRepo.listConversations(studentUserId),
+    notificationRepo.countUnread(studentUserId),
+    messageService.listConversations({ id: studentUserId, role: 'student' }),
     userRepo.getStudentProfile(studentUserId),
   ]);
 
-  const upcomingClasses = bookings.items.filter(
-    (b) => new Date(b.startAt) >= now && !['cancelled'].includes(b.status)
-  );
+  const upcomingClasses = upcoming.items;
   const homeworkDue = homework.items.filter((h) =>
-    [ASSIGNMENT_STATUS.ASSIGNED, ASSIGNMENT_STATUS.SUBMITTED, ASSIGNMENT_STATUS.OVERDUE].includes(
-      h.status
-    )
+    [ASSIGNMENT_STATUS.ASSIGNED, ASSIGNMENT_STATUS.OVERDUE].includes(h.status)
   );
   const recentGrades = (progress.records || [])
     .filter((r) => r.metricType === 'homework' || r.scoreLabel)
@@ -41,7 +43,7 @@ async function getDashboard(studentUserId) {
     .sort((a, b) => new Date(a.deadline) - new Date(b.deadline))
     .slice(0, 8);
   const recentActivity = [
-    ...bookings.items.slice(0, 5).map((b) => ({
+    ...recentBookings.map((b) => ({
       type: 'booking',
       at: b.updatedAt || b.createdAt,
       summary: `Class ${b.status}`,
@@ -56,8 +58,6 @@ async function getDashboard(studentUserId) {
   ]
     .sort((a, b) => new Date(b.at) - new Date(a.at))
     .slice(0, 10);
-
-  const unreadNotifications = (notifications.items || []).filter((n) => !n.isRead).length;
 
   return {
     upcomingClasses: sanitizeBookingItems(upcomingClasses, 'student'),

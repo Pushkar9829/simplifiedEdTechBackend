@@ -25,6 +25,8 @@ const planSchema = Joi.object({
   billingCycle: Joi.string(),
   features: Joi.array().items(Joi.string()),
   audience: Joi.string(),
+  planKind: Joi.string().valid('single', 'regular', 'subscription'),
+  classCount: Joi.number().min(1),
   rankBoost: Joi.number().min(0).max(100),
   isActive: Joi.boolean(),
 });

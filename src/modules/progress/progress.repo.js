@@ -4,6 +4,19 @@ async function createRecord(data) {
   return ProgressRecord.create(data);
 }
 
+async function upsertRecordByAssignment(assignmentId, data) {
+  const key = String(assignmentId);
+  const existing = await ProgressRecord.findOne({
+    studentUserId: data.studentUserId,
+    'meta.assignmentId': key,
+  });
+  if (!existing) return ProgressRecord.create({ ...data, meta: { assignmentId: key } });
+  existing.set(data);
+  existing.meta = { ...(existing.meta || {}), assignmentId: key };
+  existing.markModified('meta');
+  return existing.save();
+}
+
 async function listRecords(studentUserId) {
   return ProgressRecord.find({ studentUserId })
     .populate('subjectId')
@@ -17,7 +30,11 @@ async function aggregateBySubject(studentUserId) {
       $group: {
         _id: '$subjectId',
         count: { $sum: 1 },
-        avgScore: { $avg: '$scoreValue' },
+        avgScore: {
+          $avg: {
+            $cond: [{ $in: ['$metricType', ['hours', 'badge']] }, null, '$scoreValue'],
+          },
+        },
         totalHours: { $sum: '$hours' },
         topics: { $addToSet: '$topic' },
       },
@@ -27,6 +44,10 @@ async function aggregateBySubject(studentUserId) {
 
 async function createBadge(data) {
   return Badge.create(data);
+}
+
+async function findBadgeById(id) {
+  return Badge.findById(id);
 }
 
 async function listBadges() {
@@ -47,9 +68,11 @@ async function studentBadges(studentUserId) {
 
 module.exports = {
   createRecord,
+  upsertRecordByAssignment,
   listRecords,
   aggregateBySubject,
   createBadge,
+  findBadgeById,
   listBadges,
   awardBadge,
   studentBadges,

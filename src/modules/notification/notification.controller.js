@@ -3,7 +3,12 @@ const { success } = require('../../common/response');
 const { asyncHandler } = require('../../utils/asyncHandler');
 
 const list = asyncHandler(async (req, res) => {
-  const data = await notificationService.list(req.user.id, req.query);
+  const data = await notificationService.list(req.user.id, req.query, req.user.role);
+  return success(res, data);
+});
+
+const unreadCount = asyncHandler(async (req, res) => {
+  const data = await notificationService.unreadCount(req.user.id, req.user.role);
   return success(res, data);
 });
 
@@ -17,4 +22,4 @@ const markAllRead = asyncHandler(async (req, res) => {
   return success(res, data, 'All marked as read');
 });
 
-module.exports = { list, markRead, markAllRead };
+module.exports = { list, unreadCount, markRead, markAllRead };

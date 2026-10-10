@@ -53,8 +53,12 @@ async function createTicket(data) {
   return SupportTicket.create(data);
 }
 
+async function findTicketById(id) {
+  return SupportTicket.findById(id);
+}
+
 async function updateTicket(id, data) {
-  return SupportTicket.findByIdAndUpdate(id, data, { new: true });
+  return SupportTicket.findByIdAndUpdate(id, data, { new: true, runValidators: true });
 }
 
 async function listTickets(filter = {}) {
@@ -75,6 +79,7 @@ module.exports = {
   updateCampaign,
   listCampaigns,
   createTicket,
+  findTicketById,
   updateTicket,
   listTickets,
 };

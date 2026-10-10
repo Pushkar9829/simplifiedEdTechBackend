@@ -7,6 +7,16 @@ const list = asyncHandler(async (req, res) => {
   return success(res, data);
 });
 
+const listOpen = asyncHandler(async (req, res) => {
+  const data = await projectService.listOpen(req.user, req.query);
+  return success(res, data);
+});
+
+const join = asyncHandler(async (req, res) => {
+  const data = await projectService.join(req.user, req.params.id, req.body?.studentUserId);
+  return created(res, data, 'Joined project');
+});
+
 const getById = asyncHandler(async (req, res) => {
   const data = await projectService.getById(req.user, req.params.id);
   return success(res, data);
@@ -32,4 +42,4 @@ const deliver = asyncHandler(async (req, res) => {
   return success(res, data, 'Deliverables uploaded');
 });
 
-module.exports = { list, getById, create, update, setStatus, deliver };
+module.exports = { list, listOpen, join, getById, create, update, setStatus, deliver };

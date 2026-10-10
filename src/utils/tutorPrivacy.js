@@ -22,27 +22,44 @@ function hideTutorContact(role) {
   return role === 'student' || role === 'parent';
 }
 
-function sanitizeTutorPayload(data, role) {
-  if (!data || !hideTutorContact(role)) return data;
+function stripSensitiveProfile(profile) {
+  if (!profile) return profile;
+  const o = toPlain(profile);
+  delete o.identity;
+  delete o.gst;
+  delete o.emergencyContact;
+  delete o.addresses;
+  delete o.currentAddress;
+  delete o.permanentAddress;
+  delete o.dateOfBirth;
+  delete o.whatsappNumber;
+  return o;
+}
+
+function sanitizeTutorPayload(data, role, viewerId) {
+  if (!data) return data;
   const next = { ...data };
-  if (next.profile?.userId) {
-    next.profile = { ...toPlain(next.profile), userId: stripContact(next.profile.userId) };
-  }
-  if (next.verification) {
+  if (next.profile) next.profile = stripSensitiveProfile(next.profile);
+  const ownerId = next.profile?.userId?._id || next.profile?.userId;
+  const isOwner = viewerId && ownerId && String(viewerId) === String(ownerId);
+  if (next.verification && role !== 'admin' && !isOwner) {
     next.verification = {
       _id: next.verification._id,
       status: next.verification.status,
       reviewedAt: next.verification.reviewedAt,
     };
   }
+  if (!hideTutorContact(role)) return next;
+  if (next.profile?.userId) {
+    next.profile = { ...toPlain(next.profile), userId: stripContact(next.profile.userId) };
+  }
   return next;
 }
 
 function sanitizeTutorSearchItems(items, role) {
-  if (!hideTutorContact(role)) return items;
   return (items || []).map((item) => {
-    const profile = toPlain(item.profile);
-    if (profile?.userId) profile.userId = stripContact(profile.userId);
+    const profile = stripSensitiveProfile(item.profile);
+    if (hideTutorContact(role) && profile?.userId) profile.userId = stripContact(profile.userId);
     return { ...item, profile };
   });
 }

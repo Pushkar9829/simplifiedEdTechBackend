@@ -57,6 +57,11 @@ const listTickets = asyncHandler(async (req, res) => {
   return success(res, data);
 });
 
+const listMyTickets = asyncHandler(async (req, res) => {
+  const data = await cmsService.listMyTickets(req.user.id, req.query);
+  return success(res, data);
+});
+
 const updateTicket = asyncHandler(async (req, res) => {
   const data = await cmsService.updateTicket(req.params.id, req.body);
   return success(res, data);
@@ -74,5 +79,6 @@ module.exports = {
   updateCampaign,
   createTicket,
   listTickets,
+  listMyTickets,
   updateTicket,
 };

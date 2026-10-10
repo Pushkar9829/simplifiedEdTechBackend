@@ -12,25 +12,56 @@ const {
   VERIFICATION_REQUIRED_FIELDS,
   VERIFICATION_MIN_REFERENCES,
   VERIFICATION_MAX_FILES_PER_FIELD,
+  USER_STATUS,
 } = require('../../common/constants');
 const { toUtc } = require('../../utils/time');
-const { hideTutorContact, sanitizeTutorPayload, sanitizeTutorSearchItems } = require('../../utils/tutorPrivacy');
+const {
+  hideTutorContact,
+  stripContact,
+  sanitizeTutorPayload,
+  sanitizeTutorSearchItems,
+} = require('../../utils/tutorPrivacy');
 const { storedFileUrl } = require('../../utils/mediaUrl');
 
 const { FavoriteTutor } = require('./tutor.model');
+const Subject = require('../subject/subject.model');
+
+async function isBlocked(a, b) {
+  if (!a || !b) return false;
+  const UserBlock = require('../user/block.model');
+  return Boolean(
+    await UserBlock.exists({
+      $or: [
+        { byUserId: a, targetUserId: b },
+        { byUserId: b, targetUserId: a },
+      ],
+    })
+  );
+}
 
 async function search(query, user) {
   const role = user?.role;
   const q = { ...query, hideTutorName: hideTutorContact(role) };
+  if (user?.id) {
+    const UserBlock = require('../user/block.model');
+    const blocks = await UserBlock.find({
+      $or: [{ byUserId: user.id }, { targetUserId: user.id }],
+    });
+    q.excludeIds = blocks.map((b) =>
+      String(b.byUserId) === String(user.id) ? b.targetUserId : b.byUserId
+    );
+  }
+  const page = Math.max(1, Math.floor(Number(query.page)) || 1);
+  const limit = Math.min(100, Math.max(1, Math.floor(Number(query.limit)) || 20));
   if (q.favorites === 'true' && user?.id) {
     const favs = await FavoriteTutor.find({ studentUserId: user.id }).select('tutorUserId');
     q.favoriteIds = favs.map((f) => f.tutorUserId);
-    if (!q.favoriteIds.length) return { items: [], total: 0, page: 1, limit: Number(q.limit) || 20 };
+    if (!q.favoriteIds.length) return { items: [], total: 0, page, limit };
   }
-  const data = await tutorRepo.searchTutors(q, {
-    page: Number(query.page) || 1,
-    limit: Number(query.limit) || 20,
-  });
+  if (q.timeSlot && !q.timezone && user?.id) {
+    q.timezone = (await userRepo.findById(user.id))?.timezone || 'UTC';
+  }
+  const data = await tutorRepo.searchTutors(q, { page, limit });
   const items = sanitizeTutorSearchItems(data.items, role);
   if (user?.id && (role === 'student' || role === 'parent')) {
     const ids = items.map((i) => String(i.profile?.userId?._id || i.profile?.userId));
@@ -47,7 +78,21 @@ async function search(query, user) {
 async function getById(id, user) {
   const data = await tutorRepo.getTutorDetail(id);
   if (!data) throw new ApiError(404, 'Tutor not found');
-  const payload = sanitizeTutorPayload(data, user?.role);
+  const isOwner = user?.id && String(user.id) === String(id);
+  if (user?.role !== 'admin' && !isOwner) {
+    if (await isBlocked(user?.id, id)) throw new ApiError(404, 'Tutor not found');
+    if (hideTutorContact(user?.role)) {
+      const tutorUser = await userRepo.findById(id);
+      if (
+        !tutorUser ||
+        tutorUser.status !== USER_STATUS.ACTIVE ||
+        data.profile.verificationStatus !== VERIFICATION_STATUS.APPROVED
+      ) {
+        throw new ApiError(404, 'Tutor not found');
+      }
+    }
+  }
+  const payload = sanitizeTutorPayload(data, user?.role, user?.id);
   if (user?.id && (user.role === 'student' || user.role === 'parent')) {
     payload.favorite = Boolean(
       await FavoriteTutor.findOne({ studentUserId: user.id, tutorUserId: id })
@@ -56,10 +101,16 @@ async function getById(id, user) {
   return payload;
 }
 
-async function listFavorites(studentUserId) {
-  return FavoriteTutor.find({ studentUserId }).populate({
+async function listFavorites(studentUserId, role) {
+  const favs = await FavoriteTutor.find({ studentUserId }).populate({
     path: 'tutorUserId',
     select: 'name avatar country timezone refCode',
+  });
+  if (!hideTutorContact(role)) return favs;
+  return favs.map((f) => {
+    const row = f.toObject();
+    if (row.tutorUserId) row.tutorUserId = stripContact(row.tutorUserId);
+    return row;
   });
 }
 
@@ -75,8 +126,61 @@ async function removeFavorite(studentUserId, tutorUserId) {
   return FavoriteTutor.findOneAndDelete({ studentUserId, tutorUserId });
 }
 
+const PROTECTED_PROFILE_FIELDS = [
+  '_id',
+  'userId',
+  'verificationStatus',
+  'ratingAvg',
+  'ratingCount',
+  'isPremium',
+  'premiumUntil',
+  'premiumRank',
+  'createdAt',
+  'updatedAt',
+  '__v',
+];
+
 async function updateMyProfile(userId, data) {
   const { timezone, country, name, email, avatar, ...profileData } = data;
+  PROTECTED_PROFILE_FIELDS.forEach((k) => delete profileData[k]);
+  Object.keys(profileData).forEach((k) => {
+    if (k.startsWith('$') || k.includes('.')) delete profileData[k];
+  });
+  ['identity', 'gst'].forEach((k) => {
+    if (profileData[k] !== undefined && (typeof profileData[k] !== 'object' || !profileData[k])) {
+      delete profileData[k];
+    }
+  });
+  if (profileData.identity || profileData.gst) {
+    const current = await userRepo.getTutorProfile(userId);
+    if (profileData.identity) {
+      const prev = current?.identity || {};
+      const number = profileData.identity.number ?? prev.number;
+      let status = prev.status || 'unverified';
+      if (!number) status = 'unverified';
+      else if (number !== prev.number) status = 'pending';
+      profileData.identity = { ...profileData.identity, status };
+    }
+    if (profileData.gst) {
+      const prev = current?.gst || {};
+      const { status: _s, checkedAt: _c, portalNote: _p, ...gst } = profileData.gst;
+      const numberChanged = gst.number !== undefined && gst.number !== prev.number;
+      profileData.gst = numberChanged
+        ? { ...gst, status: 'unverified' }
+        : {
+            ...gst,
+            status: prev.status || 'unverified',
+            checkedAt: prev.checkedAt,
+            portalNote: prev.portalNote || '',
+          };
+    }
+  }
+  if (email !== undefined && email !== '') {
+    const owner = await userRepo.findByEmail(email);
+    if (owner && String(owner._id) !== String(userId)) {
+      throw new ApiError(409, 'Email is already in use');
+    }
+  }
   const userPatch = {
     ...(timezone !== undefined && timezone !== '' && { timezone }),
     ...(country !== undefined && { country }),
@@ -100,6 +204,11 @@ function assertTimezone(tz) {
 
 async function addSubjectOffering(userId, body) {
   const data = { ...body };
+  const subject = await Subject.findById(data.subjectId);
+  if (!subject || !subject.isActive) throw new ApiError(400, 'Unknown or inactive subject');
+  if (subject.levels?.length && !subject.levels.includes(data.level)) {
+    throw new ApiError(400, `Level must be one of: ${subject.levels.join(', ')}`);
+  }
   ['countryId', 'boardId', 'classLevelId'].forEach((k) => {
     if (!data[k]) data[k] = undefined;
   });
@@ -193,8 +302,16 @@ async function addAvailability(userId, body) {
   });
 }
 
+// Flag free slots that clash with a booking made by time, so pickers can skip them.
 async function myAvailability(userId) {
-  return tutorRepo.listAvailability(userId);
+  const slots = await tutorRepo.listAvailability(userId);
+  const open = slots.filter((s) => !s.isBooked);
+  const usable = new Set((await tutorRepo.withoutBookedOverlaps(userId, open)).map((s) => String(s._id)));
+  return slots.map((s) => {
+    const row = typeof s.toObject === 'function' ? s.toObject() : { ...s };
+    row.clashesWithBooking = !s.isBooked && !usable.has(String(s._id));
+    return row;
+  });
 }
 
 async function removeAvailability(userId, id) {
@@ -351,7 +468,10 @@ async function submitVerification(tutorUserId, files, notes) {
   verification.rejectReason = '';
   verification.submittedAt = new Date();
   await verification.save();
-  await tutorRepo.setProfileVerification(tutorUserId, VERIFICATION_STATUS.PENDING);
+  const profile = await userRepo.getTutorProfile(tutorUserId);
+  if (profile?.verificationStatus !== VERIFICATION_STATUS.APPROVED) {
+    await tutorRepo.setProfileVerification(tutorUserId, VERIFICATION_STATUS.PENDING);
+  }
   return verification;
 }
 
@@ -438,20 +558,17 @@ async function addReview(studentUserId, tutorUserId, body) {
   const tutorProfile = await userRepo.getTutorProfile(tutorUserId);
   if (!tutorProfile) throw new ApiError(404, 'Tutor not found');
 
-  const bookingRepo = require('../booking/booking.repo');
-  const paymentRepo = require('../payment/payment.repo');
-  const bookings = await bookingRepo.list(
-    { studentUserId, tutorUserId, status: 'completed' },
-    { page: 1, limit: 20 }
-  );
-  const bookingIds = (bookings.items || []).map((b) => b._id);
+  const Booking = require('../booking/booking.model');
+  const { Payment } = require('../payment/payment.model');
+  const bookingIds = await Booking.distinct('_id', {
+    studentUserId,
+    tutorUserId,
+    status: 'completed',
+  });
   const paid = bookingIds.length
-    ? await paymentRepo.listPayments({
-        bookingId: { $in: bookingIds },
-        status: 'paid',
-      })
-    : { total: 0 };
-  if (!paid.total) {
+    ? await Payment.exists({ bookingId: { $in: bookingIds }, status: 'paid' })
+    : null;
+  if (!paid) {
     throw new ApiError(403, 'You can only review a tutor after a completed paid session');
   }
 
@@ -489,7 +606,8 @@ async function addLessonPlan(tutorUserId, body) {
 }
 
 async function updateLessonPlan(tutorUserId, id, body) {
-  const plan = await tutorRepo.updateLessonPlan(id, tutorUserId, body);
+  const { _id, tutorUserId: _owner, ...patch } = body;
+  const plan = await tutorRepo.updateLessonPlan(id, tutorUserId, patch);
   if (!plan) throw new ApiError(404, 'Lesson plan not found');
   return plan;
 }

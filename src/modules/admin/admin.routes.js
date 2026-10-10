@@ -25,6 +25,7 @@ router.patch(
 );
 
 router.get('/payments', paymentController.adminList);
+router.get('/payments/:id', paymentController.adminGet);
 router.patch('/payments/:id/status', validate(payStatusSchema), paymentController.adminSetStatus);
 router.post('/subscription-plans', validate(planSchema), paymentController.createPlan);
 router.patch(

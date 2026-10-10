@@ -4,7 +4,9 @@ const { PROJECT_STATUS } = require('../../common/constants');
 const objectId = Joi.string().hex().length(24);
 
 const createSchema = Joi.object({
-  studentUserId: objectId.required(),
+  studentUserId: objectId.allow('', null),
+  subjectId: objectId.allow('', null),
+  openToJoin: Joi.boolean(),
   kind: Joi.string().valid('project', 'assignment'),
   name: Joi.string().required(),
   description: Joi.string().allow(''),
@@ -26,6 +28,8 @@ const updateSchema = Joi.object({
   price: Joi.number().min(1),
   currency: Joi.string().length(3).uppercase(),
   deliveryDate: Joi.date().iso(),
+  openToJoin: Joi.boolean(),
+  subjectId: objectId.allow('', null),
 });
 
 module.exports = { createSchema, statusSchema, updateSchema };

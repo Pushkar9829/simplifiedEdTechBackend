@@ -2,6 +2,8 @@ const express = require('express');
 const controller = require('./cms.controller');
 const { authenticate, authorize } = require('../../middleware/auth');
 const { ROLES } = require('../../common/constants');
+const { validate } = require('../../middleware/validate');
+const { updateTicketSchema } = require('./cms.validator');
 
 const router = express.Router();
 
@@ -28,7 +30,14 @@ router.post('/campaigns', authenticate, authorize(ROLES.ADMIN), controller.creat
 router.patch('/campaigns/:id', authenticate, authorize(ROLES.ADMIN), controller.updateCampaign);
 
 router.post('/tickets', authenticate, controller.createTicket);
+router.get('/tickets/mine', authenticate, controller.listMyTickets);
 router.get('/tickets', authenticate, authorize(ROLES.ADMIN), controller.listTickets);
-router.patch('/tickets/:id', authenticate, authorize(ROLES.ADMIN), controller.updateTicket);
+router.patch(
+  '/tickets/:id',
+  authenticate,
+  authorize(ROLES.ADMIN),
+  validate(updateTicketSchema),
+  controller.updateTicket
+);
 
 module.exports = router;

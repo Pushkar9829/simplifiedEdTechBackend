@@ -28,7 +28,7 @@ const remove = asyncHandler(async (req, res) => {
 });
 
 const bookmark = asyncHandler(async (req, res) => {
-  const data = await resourceService.bookmark(req.user.id, req.params.id);
+  const data = await resourceService.bookmark(req.user, req.params.id);
   return success(res, data, 'Bookmarked');
 });
 
@@ -38,7 +38,7 @@ const unbookmark = asyncHandler(async (req, res) => {
 });
 
 const myBookmarks = asyncHandler(async (req, res) => {
-  const data = await resourceService.myBookmarks(req.user.id);
+  const data = await resourceService.myBookmarks(req.user);
   return success(res, data);
 });
 

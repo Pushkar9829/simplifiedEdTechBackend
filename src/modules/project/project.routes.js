@@ -9,7 +9,9 @@ const { ROLES } = require('../../common/constants');
 const router = express.Router();
 
 router.get('/', authenticate, controller.list);
+router.get('/open', authenticate, authorize(ROLES.STUDENT, ROLES.PARENT), controller.listOpen);
 router.get('/:id', authenticate, controller.getById);
+router.post('/:id/join', authenticate, authorize(ROLES.STUDENT, ROLES.PARENT), controller.join);
 router.post(
   '/',
   authenticate,

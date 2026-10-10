@@ -82,20 +82,127 @@ async function create(tutorUserId, body, files = []) {
   if (!(Number(body.price) > 0)) {
     throw new ApiError(400, 'Set the fee the student will pay you');
   }
+  const openToJoin = body.openToJoin === true || body.openToJoin === 'true' || !body.studentUserId;
   const project = await Project.create({
     ...body,
+    studentUserId: body.studentUserId || undefined,
+    subjectId: body.subjectId || undefined,
+    openToJoin,
     tutorUserId,
     attachments: filesFrom(files),
     status: PROJECT_STATUS.PROPOSED,
   });
-  await notificationService.notify(
-    body.studentUserId,
-    'New project fee',
-    `${body.name} · your tutor charged a fee. Accept and pay to start. Students are not paid.`,
-    'project',
-    { projectId: project._id }
-  );
+  if (body.studentUserId) {
+    await notificationService.notify(
+      body.studentUserId,
+      'New project fee',
+      `${body.name} · your tutor charged a fee. Accept and pay to start. Students are not paid.`,
+      'project',
+      { projectId: project._id }
+    );
+  }
   return project;
+}
+
+async function listOpen(user, query = {}) {
+  const filter = { openToJoin: true };
+  if (query.subjectId) filter.subjectId = query.subjectId;
+  if (query.kind) filter.kind = query.kind;
+  if (query.paid === 'free') filter.price = 0;
+  if (query.paid === 'paid') filter.price = { $gt: 0 };
+  if (query.minPrice) filter.price = { ...(typeof filter.price === 'object' ? filter.price : {}), $gte: Number(query.minPrice) };
+  if (query.maxPrice) filter.price = { ...(typeof filter.price === 'object' ? filter.price : {}), $lte: Number(query.maxPrice) };
+  if (query.search) {
+    const escaped = String(query.search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    filter.$or = [{ name: new RegExp(escaped, 'i') }, { description: new RegExp(escaped, 'i') }];
+  }
+  const FavoriteItem = require('../favorite/favorite.model');
+  if (query.favorites === 'true' && user?.id) {
+    const favs = await FavoriteItem.find({ userId: user.id, kind: 'project' }).select('targetId');
+    filter._id = { $in: favs.map((f) => f.targetId) };
+    if (!favs.length) return [];
+  }
+  const rows = await Project.find(filter)
+    .populate('tutorUserId', 'name refCode')
+    .populate('subjectId', 'name category')
+    .sort({ deliveryDate: 1 });
+  const favIds = user?.id
+    ? new Set(
+        (await FavoriteItem.find({ userId: user.id, kind: 'project' }).select('targetId')).map((f) =>
+          String(f.targetId)
+        )
+      )
+    : new Set();
+  return rows.map((row) => {
+    const next = typeof row.toObject === 'function' ? row.toObject() : { ...row };
+    if (next.tutorUserId && hideTutorContact(user?.role)) next.tutorUserId = stripContact(next.tutorUserId);
+    next.favorite = favIds.has(String(next._id));
+    return next;
+  });
+}
+
+async function join(user, id, studentUserId) {
+  const source = await Project.findById(id);
+  if (!source || !source.openToJoin) throw new ApiError(404, 'Project is not open to join');
+  const sid = user.role === ROLES.STUDENT ? user.id : studentUserId;
+  if (!sid) throw new ApiError(400, 'studentUserId is required');
+  if (user.role === ROLES.PARENT) {
+    const link = await parentRepo.findLink(user.id, sid);
+    if (!link) throw new ApiError(403, 'Student not linked to this parent');
+  } else if (user.role !== ROLES.STUDENT) {
+    throw new ApiError(403, 'Not allowed');
+  }
+  const existing = await Project.findOne({ sourceProjectId: source._id, studentUserId: sid });
+  if (existing) return getById(user, existing._id);
+
+  const clone = await Project.create({
+    tutorUserId: source.tutorUserId,
+    studentUserId: sid,
+    subjectId: source.subjectId,
+    openToJoin: false,
+    sourceProjectId: source._id,
+    kind: source.kind,
+    name: source.name,
+    description: source.description,
+    status: PROJECT_STATUS.PROPOSED,
+    price: source.price,
+    currency: source.currency,
+    deliveryDate: source.deliveryDate,
+    attachments: source.attachments,
+  });
+
+  if (Number(clone.price) > 0) {
+    const payment = await paymentRepo.createPayment({
+      payerUserId: sid,
+      beneficiaryUserId: clone.tutorUserId,
+      projectId: clone._id,
+      amount: clone.price,
+      currency: clone.currency,
+      method: 'manual',
+      status: PAYMENT_STATUS.PENDING,
+      description: `Project fee: ${clone.name}`,
+    });
+    clone.paymentId = payment._id;
+    await clone.save();
+    await notificationService.notify(
+      sid,
+      'Project fee due',
+      `Pay ${clone.name} so your tutor can start. Students do not get paid for projects.`,
+      'payment',
+      { paymentId: payment._id, projectId: clone._id }
+    );
+  }
+  await notificationService.notify(
+    clone.tutorUserId,
+    'Student joined project',
+    `A student joined ${clone.name}.`,
+    'project',
+    { projectId: clone._id }
+  );
+  const row = await getById(user, clone._id);
+  const next = typeof row.toObject === 'function' ? row.toObject() : { ...row };
+  next.payNow = Number(clone.price) > 0;
+  return next;
 }
 
 async function setStatus(user, id, status) {
@@ -156,6 +263,13 @@ async function setStatus(user, id, status) {
 
   const patch = { status };
   const updated = await Project.findByIdAndUpdate(id, patch, { returnDocument: 'after' });
+  if (status === PROJECT_STATUS.CANCELLED && project.paymentId) {
+    const { Payment } = require('../payment/payment.model');
+    await Payment.updateMany(
+      { _id: idOf(project.paymentId), status: { $in: [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.FAILED] } },
+      { status: PAYMENT_STATUS.CANCELLED }
+    );
+  }
   await notificationService.notify(
     user.role === ROLES.TUTOR ? idOf(project.studentUserId) : idOf(project.tutorUserId),
     'Project update',
@@ -177,11 +291,25 @@ async function update(tutorUserId, id, body) {
   if (body.price !== undefined && !(Number(body.price) > 0)) {
     throw new ApiError(400, 'Set the fee the student will pay you');
   }
-  const allowed = ['name', 'description', 'kind', 'price', 'currency', 'deliveryDate'];
+  const priceChanged =
+    (body.price !== undefined && Number(body.price) !== Number(project.price)) ||
+    (body.currency !== undefined && body.currency !== project.currency);
+  let invoice = null;
+  if (priceChanged && project.paymentId) {
+    invoice = await paymentRepo.findPaymentById(idOf(project.paymentId));
+    if (invoice && ![PAYMENT_STATUS.PENDING, PAYMENT_STATUS.FAILED].includes(invoice.status)) {
+      throw new ApiError(400, 'The fee is already paid or being confirmed; it can no longer change');
+    }
+  }
+  const allowed = ['name', 'description', 'kind', 'price', 'currency', 'deliveryDate', 'openToJoin', 'subjectId'];
   allowed.forEach((key) => {
     if (body[key] !== undefined) project[key] = body[key];
   });
   await project.save();
+  // Keep the open invoice in step with the new fee.
+  if (invoice) {
+    await paymentRepo.updatePayment(invoice._id, { amount: project.price, currency: project.currency });
+  }
   return project;
 }
 
@@ -207,8 +335,9 @@ async function deliver(tutorUserId, id, files = []) {
 }
 
 async function acceptPaid(paymentId) {
+  // Only a still-proposed project starts on payment; never revive a cancelled or later-stage one.
   const project = await Project.findOneAndUpdate(
-    { paymentId },
+    { paymentId, status: PROJECT_STATUS.PROPOSED },
     { status: PROJECT_STATUS.ACCEPTED },
     { returnDocument: 'after' }
   );
@@ -224,4 +353,4 @@ async function acceptPaid(paymentId) {
   return project;
 }
 
-module.exports = { list, getById, create, update, setStatus, deliver, acceptPaid };
+module.exports = { list, listOpen, join, getById, create, update, setStatus, deliver, acceptPaid };

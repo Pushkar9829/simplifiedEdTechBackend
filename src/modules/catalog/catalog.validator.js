@@ -35,4 +35,19 @@ const lookupSchema = Joi.object({
   meta: Joi.object().unknown(true),
 });
 
-module.exports = { countrySchema, boardSchema, classLevelSchema, lookupSchema };
+const optionalAll = (schema, keys) => schema.fork(keys, (s) => s.optional());
+const countryUpdateSchema = optionalAll(countrySchema, ['name', 'code', 'currency']);
+const boardUpdateSchema = optionalAll(boardSchema, ['name']);
+const classLevelUpdateSchema = optionalAll(classLevelSchema, ['name']);
+const lookupUpdateSchema = optionalAll(lookupSchema, ['group', 'value', 'label']);
+
+module.exports = {
+  countrySchema,
+  boardSchema,
+  classLevelSchema,
+  lookupSchema,
+  countryUpdateSchema,
+  boardUpdateSchema,
+  classLevelUpdateSchema,
+  lookupUpdateSchema,
+};

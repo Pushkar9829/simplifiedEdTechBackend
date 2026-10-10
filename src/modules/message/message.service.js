@@ -1,6 +1,8 @@
 const messageRepo = require('./message.repo');
 const bookingRepo = require('../booking/booking.repo');
 const parentRepo = require('../parent/parent.repo');
+const userRepo = require('../user/user.repo');
+const userService = require('../user/user.service');
 const notificationService = require('../notification/notification.service');
 const { maskText, maskFileName } = require('../../utils/contentFilter');
 const { storedFileUrl } = require('../../utils/mediaUrl');
@@ -27,20 +29,41 @@ async function listConversations(user) {
   return hideTutorPeople(typeof user === 'object' ? user : { role: '' }, rows);
 }
 
+async function assertCanMessage(userId, otherIds) {
+  for (const otherId of otherIds) {
+    if (String(otherId) === String(userId)) throw new ApiError(400, 'You cannot message yourself');
+    const other = await userRepo.findById(otherId);
+    if (!other) throw new ApiError(404, 'User not found');
+    if (other.status !== 'active') throw new ApiError(403, 'This user is not available for messaging');
+    if (await userService.isBlocked(userId, otherId)) {
+      throw new ApiError(403, 'Messaging is blocked between you and this user');
+    }
+  }
+}
+
 async function openConversation(userId, participantId) {
+  await assertCanMessage(userId, [participantId]);
   return messageRepo.findOrCreateConversation([userId, participantId]);
 }
 
-async function send(userId, body, files = []) {
+// official: platform-generated booking messages (class links, feedback) skip block/status checks.
+async function send(userId, body, files = [], { official = false } = {}) {
   let conversationId = body.conversationId;
   if (!conversationId) {
     if (!body.participantId) throw new ApiError(400, 'participantId or conversationId required');
+    if (!official) await assertCanMessage(userId, [body.participantId]);
     const convo = await messageRepo.findOrCreateConversation([userId, body.participantId]);
     conversationId = convo._id;
   } else {
     const convo = await messageRepo.findConversationById(conversationId);
     if (!convo || !convo.participants.map(String).includes(userId)) {
       throw new ApiError(403, 'Not a participant');
+    }
+    if (!official) {
+      await assertCanMessage(
+        userId,
+        convo.participants.map(String).filter((id) => id !== String(userId))
+      );
     }
   }
 
@@ -148,7 +171,7 @@ async function contacts(user) {
 }
 
 async function sendOfficial(senderId, participantId, text, kind = 'class_links') {
-  return send(senderId, { participantId, body: text, kind });
+  return send(senderId, { participantId, body: text, kind }, [], { official: true });
 }
 
 module.exports = { listConversations, openConversation, send, sendOfficial, listMessages, markRead, contacts };
